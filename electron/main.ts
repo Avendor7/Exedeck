@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pidusage from 'pidusage'
@@ -196,7 +197,27 @@ async function runSmokeFlow(win: BrowserWindow): Promise<void> {
   }, 1600)
 }
 
+function resolveWindowIcon(): string | undefined {
+  const iconNameByPlatform: Partial<Record<NodeJS.Platform, string>> = {
+    linux: 'icon.png',
+    win32: 'icon.ico',
+  }
+
+  const iconName = iconNameByPlatform[process.platform]
+  if (!iconName) {
+    return undefined
+  }
+
+  const candidates = [
+    path.join(process.resourcesPath, 'build', iconName),
+    path.join(repoRoot, 'build', iconName),
+  ]
+
+  return candidates.find((candidatePath) => fs.existsSync(candidatePath))
+}
+
 function createMainWindow(): BrowserWindow {
+  const icon = resolveWindowIcon()
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -204,6 +225,7 @@ function createMainWindow(): BrowserWindow {
     minHeight: 640,
     backgroundColor: '#0f1115',
     show: false,
+    ...(icon ? { icon } : {}),
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.cjs'),
       contextIsolation: true,
