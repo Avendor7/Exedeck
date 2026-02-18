@@ -533,6 +533,9 @@ button:disabled {
 .task-editor-list {
   display: grid;
   gap: 10px;
+  max-height: 30vh;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .task-card {
