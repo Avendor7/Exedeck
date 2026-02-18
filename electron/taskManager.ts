@@ -62,16 +62,22 @@ export class TaskManager {
 
     let child: pty.IPty
     try {
-      child = pty.spawn(task.command, task.args, {
-        name: 'xterm-256color',
-        cols: 120,
-        rows: 30,
-        cwd,
-        env: {
-          ...process.env,
-          TERM: 'xterm-256color',
-        },
-      })
+      let spawnCommand = task.command
+        let spawnArgs = task.args
+        if (process.platform === 'win32') {
+          spawnCommand = 'cmd.exe'
+          spawnArgs = ['/c', task.command, ...task.args]
+        }
+        child = pty.spawn(spawnCommand, spawnArgs, {
+          name: 'xterm-256color',
+          cols: 120,
+          rows: 30,
+          cwd,
+          env: {
+            ...process.env,
+            TERM: 'xterm-256color',
+          },
+        })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const chunk = `\r\n[exedeck] Failed to start task "${task.name}": ${message}\r\n`
