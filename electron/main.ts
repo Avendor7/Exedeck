@@ -114,6 +114,7 @@ function registerIpcHandlers(): void {
 
     return result.filePaths[0]
   })
+  ipcMain.handle('project:default-directory', async () => path.join(app.getPath('documents'), 'Exedeck'))
 
   ipcMain.handle('project:create', async (_event, request: ProjectCreateRequest) => {
     if (!request || (request.framework !== 'laravel' && request.framework !== 'adonisjs')) {

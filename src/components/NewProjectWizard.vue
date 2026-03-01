@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type {
   ProjectCreateDataEvent,
   ProjectCreateDoneEvent,
@@ -26,10 +26,22 @@ const inputLine = ref('')
 const localError = ref('')
 
 const unsubscribers: Array<() => void> = []
-const ansiPattern = /\u001b\[[0-?]*[ -/]*[@-~]/g
-
 function sanitizeTerminalChunk(chunk: string): string {
-  return chunk.replace(ansiPattern, '')
+  let next = chunk
+    .replace(/\u001b\][\s\S]*?(?:\u0007|\u001b\\)/g, '')
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\u001b[@-Z\\-_]/g, '')
+    .replace(/[\u2800-\u28ff]/g, '')
+
+  // Resolve backspace-based redraws used by CLI spinners/progress bars.
+  while (/[^\n]\u0008/.test(next)) {
+    next = next.replace(/[^\n]\u0008/g, '')
+  }
+
+  // Convert carriage-return redraw frames into plain new lines for log readability.
+  next = next.replace(/\r(?!\n)/g, '\n')
+
+  return next
 }
 
 function attachListeners(): void {
@@ -81,6 +93,17 @@ function detachListeners(): void {
 
 onBeforeUnmount(() => {
   detachListeners()
+})
+
+onMounted(async () => {
+  if (projectDirectory.value.trim() && projectDirectory.value.trim() !== '.') {
+    return
+  }
+
+  const defaultDirectory = await window.exedeck.projectDefaultDirectory()
+  if (defaultDirectory.trim()) {
+    projectDirectory.value = defaultDirectory
+  }
 })
 
 const canStart = computed<boolean>(() => {

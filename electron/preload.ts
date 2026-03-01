@@ -17,6 +17,7 @@ const api: ExedeckApi = {
   configGet: () => ipcRenderer.invoke('config:get') as Promise<AppConfig>,
   configSet: (config) => ipcRenderer.invoke('config:set', config) as Promise<boolean>,
   pickDirectory: (initialPath) => ipcRenderer.invoke('dialog:pick-directory', initialPath) as Promise<string | null>,
+  projectDefaultDirectory: () => ipcRenderer.invoke('project:default-directory') as Promise<string>,
   projectCreate: (request) => ipcRenderer.invoke('project:create', request as ProjectCreateRequest) as Promise<string | null>,
   projectCreateInput: (jobId, data) => ipcRenderer.invoke('project:create:input', jobId, data) as Promise<boolean>,
   projectCreateCancel: (jobId) => ipcRenderer.invoke('project:create:cancel', jobId) as Promise<boolean>,

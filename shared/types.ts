@@ -93,6 +93,7 @@ export interface ExedeckApi {
   configGet: () => Promise<AppConfig>
   configSet: (config: AppConfig) => Promise<boolean>
   pickDirectory: (initialPath?: string) => Promise<string | null>
+  projectDefaultDirectory: () => Promise<string>
   projectCreate: (request: ProjectCreateRequest) => Promise<string | null>
   projectCreateInput: (jobId: string, data: string) => Promise<boolean>
   projectCreateCancel: (jobId: string) => Promise<boolean>

@@ -105,6 +105,7 @@ export class ProvisioningJobManager {
     }
 
     try {
+      await fs.mkdir(directory, { recursive: true })
       const dirStat = await fs.stat(directory)
       if (!dirStat.isDirectory()) {
         throw new Error('Selected directory is not a folder.')
