@@ -15,6 +15,7 @@ interface DraftProject {
   id: string
   name: string
   path: string
+  framework: ProjectConfig['framework']
   autoStart: boolean
   tasks: DraftTask[]
 }
@@ -33,6 +34,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   save: [config: AppConfig, selectedProjectId: string]
+  createProject: []
 }>()
 
 function toDraftTask(task: TaskConfig): DraftTask {
@@ -50,6 +52,7 @@ function toDraftProject(project: ProjectConfig): DraftProject {
     id: project.id,
     name: project.name,
     path: project.path,
+    framework: project.framework ?? 'custom',
     autoStart: project.autoStart,
     tasks: project.tasks.map(toDraftTask),
   }
@@ -94,6 +97,7 @@ function addProject(): void {
     id: createId('project'),
     name: `Project ${draft.value.projects.length + 1}`,
     path: '.',
+    framework: 'custom',
     autoStart: false,
     tasks: [createDraftTask()],
   }
@@ -159,6 +163,7 @@ function saveDraft(): void {
     id: project.id,
     name: project.name.trim() || 'Untitled project',
     path: project.path.trim() || '.',
+    framework: project.framework ?? 'custom',
     autoStart: project.autoStart,
     tasks: project.tasks
       .filter((task) => task.name.trim() || task.command.trim())
@@ -193,6 +198,7 @@ function saveDraft(): void {
       <header class="modal-header">
         <h2>Settings & Configuration</h2>
         <div class="modal-actions">
+          <button type="button" class="primary" @click="emit('createProject')">Create Project</button>
           <button
             v-if="currentProject"
             type="button"

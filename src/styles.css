@@ -104,9 +104,20 @@ button:disabled {
   min-height: 0;
 }
 
+.sidebar-controls {
+  border-bottom: 1px solid #27354d;
+}
+
 .sidebar-search {
   padding: 10px 14px;
-  border-bottom: 1px solid #27354d;
+}
+
+.sidebar-actions {
+  padding: 0 14px 10px;
+}
+
+.new-project-button {
+  width: 100%;
 }
 
 .sidebar-projects {
@@ -387,6 +398,17 @@ button:disabled {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.new-project-modal {
+  width: min(1080px, 100%);
+  height: min(86vh, 920px);
+  border: 1px solid #33445f;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #121a2a 0%, #0f1624 100%);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .modal-header {
   padding: 14px 16px;
   border-bottom: 1px solid #2a3a53;
@@ -422,6 +444,65 @@ button:disabled {
   min-height: 0;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.new-project-body {
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  padding: 14px;
+}
+
+.new-project-form {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.new-project-output {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.new-project-output h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.wizard-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.provision-log {
+  margin: 0;
+  border: 1px solid #2e3f58;
+  border-radius: 10px;
+  background: #090c12;
+  color: #c7d6ef;
+  padding: 10px;
+  overflow: auto;
+  min-height: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.provision-input-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.error-note {
+  margin: 0;
+  color: #f0b0b9;
+  font-size: 12px;
 }
 
 .settings-sidebar {
@@ -641,6 +722,11 @@ button:disabled {
   .modal-body {
     grid-template-columns: 1fr;
     grid-template-rows: 220px minmax(0, 1fr);
+  }
+
+  .new-project-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .settings-sidebar {

@@ -66,12 +66,13 @@ function submit(): void {
     id: createId('project'),
     name: projectName.value.trim() || 'My Project',
     path: projectPath.value.trim() || '.',
+    framework: 'custom',
     autoStart: projectAutoStart.value,
     tasks: nextTasks,
   }
 
   const nextConfig: AppConfig = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     onboardingCompleted: true,
     projects: [nextProject],
   }

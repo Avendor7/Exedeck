@@ -1,9 +1,9 @@
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
-import type { AppConfig, ProjectConfig, TaskConfig } from '../shared/types'
+import type { AppConfig, ProjectConfig, ProjectFramework, TaskConfig } from '../shared/types'
 
 const CONFIG_FILE = 'exedeck.config.json'
-export const CONFIG_SCHEMA_VERSION = 2
+export const CONFIG_SCHEMA_VERSION = 3
 
 function makeId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -39,11 +39,16 @@ function normalizeProject(raw: unknown, repoRoot: string, index: number): Projec
   const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   const projectPath = typeof source.path === 'string' ? source.path : repoRoot
   const rawTasks = Array.isArray(source.tasks) ? source.tasks : []
+  const framework: ProjectFramework =
+    source.framework === 'laravel' || source.framework === 'adonisjs' || source.framework === 'custom'
+      ? source.framework
+      : 'custom'
 
   return {
     id: typeof source.id === 'string' ? source.id : makeId('project'),
     name: typeof source.name === 'string' ? source.name : `Project ${index + 1}`,
     path: projectPath,
+    framework,
     autoStart: source.autoStart === true,
     tasks: rawTasks.map((task, taskIndex) => normalizeTask(task, projectPath, taskIndex)),
   }

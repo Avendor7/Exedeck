@@ -13,6 +13,8 @@ interface TaskRuntime {
   process?: pty.IPty
   running: boolean
   buffer: string
+  cols: number
+  rows: number
 }
 
 interface TaskManagerOptions {
@@ -34,6 +36,8 @@ export class TaskManager {
   private readonly onStatus: (event: TaskStatusEvent) => void
   private readonly onExit: (event: TaskExitEvent) => void
   private readonly maxBufferChars: number
+  private readonly defaultCols = 120
+  private readonly defaultRows = 30
   private readonly runtimes = new Map<string, TaskRuntime>()
 
   constructor(options: TaskManagerOptions) {
@@ -70,8 +74,8 @@ export class TaskManager {
         }
         child = pty.spawn(spawnCommand, spawnArgs, {
           name: 'xterm-256color',
-          cols: 120,
-          rows: 30,
+          cols: runtime.cols,
+          rows: runtime.rows,
           cwd,
           env: {
             ...process.env,
@@ -141,6 +145,30 @@ export class TaskManager {
     return true
   }
 
+  resizeTask(taskId: string, cols: number, rows: number): boolean {
+    const resolved = this.findTask(taskId)
+    if (!resolved) {
+      return false
+    }
+
+    const runtime = this.ensureRuntime(resolved.task)
+    const safeCols = Number.isFinite(cols) ? Math.max(20, Math.floor(cols)) : this.defaultCols
+    const safeRows = Number.isFinite(rows) ? Math.max(5, Math.floor(rows)) : this.defaultRows
+
+    runtime.cols = safeCols
+    runtime.rows = safeRows
+
+    if (runtime.process) {
+      try {
+        runtime.process.resize(safeCols, safeRows)
+      } catch {
+        return false
+      }
+    }
+
+    return true
+  }
+
   getTaskBuffer(taskId: string): string {
     return this.runtimes.get(taskId)?.buffer ?? ''
   }
@@ -156,6 +184,8 @@ export class TaskManager {
         task: resolved.task,
         running: false,
         buffer: '',
+        cols: this.defaultCols,
+        rows: this.defaultRows,
       })
       return true
     }
@@ -189,6 +219,8 @@ export class TaskManager {
       task,
       running: false,
       buffer: '',
+      cols: this.defaultCols,
+      rows: this.defaultRows,
     }
     this.runtimes.set(task.id, runtime)
     return runtime

@@ -10,8 +10,9 @@ import {
   resolveRepoRoot,
   saveConfig,
 } from './config'
+import { ProvisioningJobManager } from './provisioningJobManager'
 import { TaskManager } from './taskManager'
-import type { AppConfig, TaskConfig } from '../shared/types'
+import type { AppConfig, ProjectCreateDoneEvent, ProjectCreateRequest, TaskConfig } from '../shared/types'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -45,6 +46,51 @@ const taskManager = new TaskManager({
   },
 })
 
+const provisioningJobManager = new ProvisioningJobManager({
+  onData: (event) => {
+    mainWindow?.webContents.send('project:create:data', event)
+  },
+  onStatus: (event) => {
+    mainWindow?.webContents.send('project:create:status', event)
+  },
+  onDone: (event) => {
+    void handleProjectCreateDone(event)
+  },
+})
+
+async function handleProjectCreateDone(event: ProjectCreateDoneEvent): Promise<void> {
+  if (event.state !== 'success') {
+    mainWindow?.webContents.send('project:create:done', event)
+    return
+  }
+
+  const createdProject = await provisioningJobManager.consumeCreatedProject(event.jobId)
+  if (!createdProject) {
+    mainWindow?.webContents.send('project:create:done', {
+      jobId: event.jobId,
+      state: 'failed',
+      error: 'Project scaffold completed, but Exedeck could not register the project.',
+    } satisfies ProjectCreateDoneEvent)
+    return
+  }
+
+  appConfig = normalizeConfig(
+    {
+      ...appConfig,
+      onboardingCompleted: true,
+      projects: [...appConfig.projects, createdProject],
+    },
+    repoRoot,
+  )
+
+  await saveConfig(app.getPath('userData'), appConfig)
+
+  mainWindow?.webContents.send('project:create:done', {
+    ...event,
+    projectId: createdProject.id,
+  } satisfies ProjectCreateDoneEvent)
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle('config:get', async () => appConfig)
   ipcMain.handle('config:set', async (_event, nextConfig: AppConfig) => {
@@ -69,10 +115,27 @@ function registerIpcHandlers(): void {
     return result.filePaths[0]
   })
 
+  ipcMain.handle('project:create', async (_event, request: ProjectCreateRequest) => {
+    if (!request || (request.framework !== 'laravel' && request.framework !== 'adonisjs')) {
+      return null
+    }
+
+    const jobId = await provisioningJobManager.startJob(request)
+    return jobId
+  })
+  ipcMain.handle('project:create:input', async (_event, jobId: string, data: string) =>
+    provisioningJobManager.input(jobId, data),
+  )
+  ipcMain.handle('project:create:cancel', async (_event, jobId: string) => provisioningJobManager.cancel(jobId))
+  ipcMain.handle('project:create:get', async (_event, jobId: string) => provisioningJobManager.getStatus(jobId))
+
   ipcMain.handle('task:start', async (_event, taskId: string) => taskManager.startTask(taskId))
   ipcMain.handle('task:stop', async (_event, taskId: string) => taskManager.stopTask(taskId))
   ipcMain.handle('task:restart', async (_event, taskId: string) => taskManager.restartTask(taskId))
   ipcMain.handle('task:input', async (_event, taskId: string, data: string) => taskManager.inputTask(taskId, data))
+  ipcMain.handle('task:resize', async (_event, taskId: string, cols: number, rows: number) =>
+    taskManager.resizeTask(taskId, cols, rows),
+  )
   ipcMain.handle('task:get-buffer', async (_event, taskId: string) => taskManager.getTaskBuffer(taskId))
   ipcMain.handle('task:clear-buffer', async (_event, taskId: string) => taskManager.clearTaskBuffer(taskId))
 }
@@ -147,6 +210,7 @@ function ensureSmokeTask(): string {
           id: `project-smoke-${Date.now().toString(36)}`,
           name: 'Smoke project',
           path: repoRoot,
+          framework: 'custom',
           autoStart: false,
           tasks: [smokeTask],
         },

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { FitAddon } from 'xterm-addon-fit'
-import { Terminal } from 'xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { Terminal } from '@xterm/xterm'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps<{
@@ -10,6 +10,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   input: [data: string]
+  resize: [size: { cols: number; rows: number }]
 }>()
 
 const containerRef = ref<HTMLElement | null>(null)
@@ -43,6 +44,18 @@ defineExpose({
   focusTerminal,
   clearTerminal,
 })
+
+function fitTerminalAndNotify(): void {
+  if (!terminal || !fitAddon) {
+    return
+  }
+
+  fitAddon.fit()
+  emit('resize', {
+    cols: terminal.cols,
+    rows: terminal.rows,
+  })
+}
 
 onMounted(async () => {
   await nextTick()
@@ -81,14 +94,20 @@ onMounted(async () => {
   fitAddon = new FitAddon()
   terminal.loadAddon(fitAddon)
   terminal.open(containerRef.value)
-  fitAddon.fit()
+  fitTerminalAndNotify()
 
   terminal.onData((data) => {
     emit('input', data)
   })
 
+  terminal.onResize(({ cols, rows }) => {
+    emit('resize', { cols, rows })
+  })
+
+  containerRef.value.addEventListener('click', focusTerminal)
+
   resizeObserver = new ResizeObserver(() => {
-    fitAddon?.fit()
+    fitTerminalAndNotify()
   })
   resizeObserver.observe(containerRef.value)
 
@@ -130,6 +149,7 @@ watch(
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
+  containerRef.value?.removeEventListener('click', focusTerminal)
 
   terminal?.dispose()
   terminal = null

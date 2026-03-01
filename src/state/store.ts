@@ -231,6 +231,10 @@ export function useStore() {
     await window.exedeck.taskInput(taskId, data)
   }
 
+  const resizeTask = async (taskId: string, cols: number, rows: number): Promise<void> => {
+    await window.exedeck.taskResize(taskId, cols, rows)
+  }
+
   const clearTaskBuffer = async (taskId: string): Promise<void> => {
     await window.exedeck.taskClearBuffer(taskId)
     taskBuffers.value[taskId] = ''
@@ -260,6 +264,7 @@ export function useStore() {
     stopTask,
     restartTask,
     inputTask,
+    resizeTask,
     clearTaskBuffer,
   }
 }

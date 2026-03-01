@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import NewProjectWizard from './components/NewProjectWizard.vue'
 import OnboardingWizard from './components/OnboardingWizard.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import Sidebar from './components/Sidebar.vue'
@@ -31,12 +32,14 @@ const {
   stopTask,
   restartTask,
   inputTask,
+  resizeTask,
   clearTaskBuffer,
 } = useStore()
 
 const terminalRef = ref<InstanceType<typeof TerminalView> | null>(null)
 const settingsOpen = ref(false)
 const settingsProjectId = ref('')
+const newProjectOpen = ref(false)
 
 const headerText = computed(() => {
   if (!project.value || !selectedTask.value) {
@@ -58,6 +61,14 @@ const onTerminalInput = async (data: string): Promise<void> => {
   }
 
   await inputTask(selectedTask.value.id, data)
+}
+
+const onTerminalResize = async (size: { cols: number; rows: number }): Promise<void> => {
+  if (!selectedTask.value) {
+    return
+  }
+
+  await resizeTask(selectedTask.value.id, size.cols, size.rows)
 }
 
 const onFocus = (): void => {
@@ -103,6 +114,10 @@ const onOpenProjectSettings = (projectId: string): void => {
   settingsOpen.value = true
 }
 
+const onOpenNewProject = (): void => {
+  newProjectOpen.value = true
+}
+
 const onSelectTask = (projectId: string, taskId: string): void => {
   setSelectedProjectId(projectId)
   setSelectedTaskId(taskId)
@@ -111,6 +126,10 @@ const onSelectTask = (projectId: string, taskId: string): void => {
 const onCloseSettings = (): void => {
   settingsOpen.value = false
   settingsProjectId.value = ''
+}
+
+const onCloseNewProject = (): void => {
+  newProjectOpen.value = false
 }
 
 const onSaveSettings = async (nextConfig: AppConfig, nextProjectId: string): Promise<void> => {
@@ -123,6 +142,18 @@ const onSaveSettings = async (nextConfig: AppConfig, nextProjectId: string): Pro
 const onOnboardingComplete = async (nextConfig: AppConfig): Promise<void> => {
   await saveConfig(nextConfig)
   setSelectedProjectId(nextConfig.projects[0]?.id ?? '')
+}
+
+const onProjectCreated = async (projectId: string): Promise<void> => {
+  await loadConfig()
+  setSelectedProjectId(projectId)
+  newProjectOpen.value = false
+}
+
+const onCreateProjectFromSettings = (): void => {
+  settingsOpen.value = false
+  settingsProjectId.value = ''
+  newProjectOpen.value = true
 }
 </script>
 
@@ -142,6 +173,7 @@ const onOnboardingComplete = async (nextConfig: AppConfig): Promise<void> => {
       @toggle-project-collapsed="setProjectCollapsed"
       @update-filter="onFilterChange"
       @open-project-settings="onOpenProjectSettings"
+      @create-project="onOpenNewProject"
     />
 
     <main class="main-panel">
@@ -156,6 +188,7 @@ const onOnboardingComplete = async (nextConfig: AppConfig): Promise<void> => {
           :task-id="selectedTask?.id ?? ''"
           :buffer="selectedTaskBuffer"
           @input="onTerminalInput"
+          @resize="onTerminalResize"
         />
       </section>
 
@@ -188,5 +221,12 @@ const onOnboardingComplete = async (nextConfig: AppConfig): Promise<void> => {
     :selected-project-id="settingsProjectId || selectedProjectId"
     @close="onCloseSettings"
     @save="onSaveSettings"
+    @create-project="onCreateProjectFromSettings"
+  />
+
+  <NewProjectWizard
+    v-if="newProjectOpen"
+    @close="onCloseNewProject"
+    @created="onProjectCreated"
   />
 </template>

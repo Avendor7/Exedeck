@@ -19,6 +19,7 @@ const emit = defineEmits<{
   toggleProjectCollapsed: [projectId: string, collapsed: boolean]
   updateFilter: [value: string]
   openProjectSettings: [projectId: string]
+  createProject: []
 }>()
 
 const formatCpu = (taskId: string): string => `${props.getStats(taskId).cpu.toFixed(1)}%`
@@ -57,13 +58,18 @@ const onToggleProject = (projectId: string): void => {
 
 <template>
   <aside class="sidebar">
-    <div class="sidebar-search">
-      <input
-        :value="filterText"
-        type="text"
-        placeholder="Filter processes..."
-        @input="emit('updateFilter', ($event.target as HTMLInputElement).value)"
-      />
+    <div class="sidebar-controls">
+      <div class="sidebar-search">
+        <input
+          :value="filterText"
+          type="text"
+          placeholder="Filter processes..."
+          @input="emit('updateFilter', ($event.target as HTMLInputElement).value)"
+        />
+      </div>
+      <div class="sidebar-actions">
+        <button type="button" class="small primary new-project-button" @click="emit('createProject')">+ New Project</button>
+      </div>
     </div>
 
     <div class="sidebar-projects">
