@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NewProjectWizard from './components/NewProjectWizard.vue'
 import OnboardingWizard from './components/OnboardingWizard.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import Sidebar from './components/Sidebar.vue'
 import TerminalView from './components/TerminalView.vue'
 import Toolbar from './components/Toolbar.vue'
+import AgentWorkspace from './components/AgentWorkspace.vue'
+import GitWorkspace from './components/GitWorkspace.vue'
+import CloneRepositoryModal from './components/CloneRepositoryModal.vue'
+import AppMenuBar from './components/AppMenuBar.vue'
 import { useStore } from './state/store'
-import type { AppConfig } from '../shared/types'
+import type { AppConfig, ExternalOpenTarget } from '../shared/types'
 
 const {
   config,
@@ -29,6 +33,7 @@ const {
   setProjectCollapsed,
   getTaskRunning,
   getTaskStats,
+  getAgentRuntime,
   startTask,
   stopTask,
   restartTask,
@@ -43,8 +48,22 @@ const sidebarRef = ref<InstanceType<typeof Sidebar> | null>(null)
 const settingsOpen = ref(false)
 const settingsProjectId = ref('')
 const newProjectOpen = ref(false)
+const cloneProjectOpen = ref(false)
 const loading = ref(true)
 const loadError = ref('')
+const workspaceTab = ref<'tasks' | 'agents' | 'git'>('tasks')
+
+watch(
+  () => config.value?.preferences.appearance,
+  (appearance) => {
+    if (!appearance || appearance === 'system') {
+      document.documentElement.removeAttribute('data-theme')
+    } else {
+      document.documentElement.dataset.theme = appearance
+    }
+  },
+  { immediate: true },
+)
 
 const headerText = computed(() => {
   if (!project.value || !selectedTask.value) {
@@ -69,7 +88,7 @@ async function initialize(): Promise<void> {
 }
 
 const onGlobalKeydown = (event: KeyboardEvent): void => {
-  if (settingsOpen.value || newProjectOpen.value || onboardingRequired.value) {
+  if (settingsOpen.value || newProjectOpen.value || cloneProjectOpen.value || onboardingRequired.value) {
     return
   }
 
@@ -172,9 +191,35 @@ const onOpenNewProject = (): void => {
   newProjectOpen.value = true
 }
 
+const onProjectCloned = async (projectId: string): Promise<void> => {
+  await loadConfig()
+  setSelectedProjectId(projectId)
+  cloneProjectOpen.value = false
+  workspaceTab.value = 'git'
+}
+
 const onSelectTask = (projectId: string, taskId: string): void => {
   setSelectedProjectId(projectId)
   setSelectedTaskId(taskId)
+  workspaceTab.value = 'tasks'
+}
+
+const onSelectWorkspace = (projectId: string, workspace: 'tasks' | 'agents' | 'git'): void => {
+  setSelectedProjectId(projectId)
+  workspaceTab.value = workspace
+}
+
+const onMenuSelectWorkspace = (workspace: 'tasks' | 'agents' | 'git'): void => {
+  if (project.value) workspaceTab.value = workspace
+}
+
+const onOpenProjectExternal = async (target: ExternalOpenTarget): Promise<void> => {
+  if (!project.value) return
+  if (!(await window.exedeck.projects.openExternal(project.value.id, target))) {
+    lastError.value = target === 'editor'
+      ? 'Configure an editor command in project settings first.'
+      : `Exedeck could not open the project in ${target}.`
+  }
 }
 
 const onCloseSettings = (): void => {
@@ -192,6 +237,14 @@ const onSaveSettings = async (nextConfig: AppConfig, nextProjectId: string): Pro
     setSelectedProjectId(nextProjectId)
     settingsOpen.value = false
     settingsProjectId.value = ''
+  } catch {
+    // The store exposes the actionable error in the global alert.
+  }
+}
+
+const onWorkspaceSaveConfig = async (nextConfig: AppConfig): Promise<void> => {
+  try {
+    await saveConfig(nextConfig)
   } catch {
     // The store exposes the actionable error in the global alert.
   }
@@ -224,8 +277,26 @@ const onCreateProjectFromSettings = (): void => {
 </script>
 
 <template>
-  <div class="layout" v-if="config">
-    <Sidebar
+  <div v-if="config" class="app-shell">
+    <AppMenuBar
+      :project-name="project?.name ?? ''"
+      :has-project="Boolean(project)"
+      :workspace="workspaceTab"
+      :has-task="workspaceTab === 'tasks' && Boolean(selectedTask)"
+      :task-running="selectedTaskRunning"
+      @new-project="onOpenNewProject"
+      @clone-project="cloneProjectOpen = true"
+      @settings="selectedProjectId && onOpenProjectSettings(selectedProjectId)"
+      @select-workspace="onMenuSelectWorkspace"
+      @start="onStartSelected"
+      @stop="onStop"
+      @restart="onRestart"
+      @focus="onFocus"
+      @clear="onClear"
+      @open-project="onOpenProjectExternal"
+    />
+    <div class="layout">
+      <Sidebar
       ref="sidebarRef"
       :projects="projects"
       :selected-project-id="selectedProjectId"
@@ -234,6 +305,9 @@ const onCreateProjectFromSettings = (): void => {
       :filter-text="filterText"
       :is-running="getTaskRunning"
       :get-stats="getTaskStats"
+      :agent-sessions="config.agentSessions"
+      :get-agent-runtime="getAgentRuntime"
+      :selected-workspace="workspaceTab"
       @select-project="setSelectedProjectId"
       @select-task="onSelectTask"
       @start="onStart"
@@ -241,21 +315,23 @@ const onCreateProjectFromSettings = (): void => {
       @update-filter="onFilterChange"
       @open-project-settings="onOpenProjectSettings"
       @create-project="onOpenNewProject"
-    />
+      @clone-project="cloneProjectOpen = true"
+      @select-workspace="onSelectWorkspace"
+      />
 
-    <main class="main-panel">
+      <main class="main-panel">
       <header class="panel-header">
         <div class="panel-heading">
           <span v-if="project" class="panel-eyebrow">{{ project.name }}</span>
-          <h1>{{ selectedTask?.name ?? 'No task selected' }}</h1>
+          <h1>{{ workspaceTab === 'tasks' ? (selectedTask?.name ?? 'No task selected') : workspaceTab === 'agents' ? 'Agents' : 'Git' }}</h1>
         </div>
-        <span class="running-pill" :class="{ active: selectedTaskRunning }" role="status">
+        <span v-if="workspaceTab === 'tasks'" class="running-pill" :class="{ active: selectedTaskRunning }" role="status">
           <span class="status-dot" :class="{ running: selectedTaskRunning }" aria-hidden="true" />
           {{ selectedTaskStatusLabel }}
         </span>
       </header>
 
-      <section v-if="selectedTask" class="terminal-section" :aria-label="`${headerText} terminal`">
+      <section v-if="workspaceTab === 'tasks' && selectedTask" class="terminal-section" :aria-label="`${headerText} terminal`">
         <TerminalView
           ref="terminalRef"
           :task-id="selectedTask?.id ?? ''"
@@ -265,7 +341,7 @@ const onCreateProjectFromSettings = (): void => {
         />
       </section>
 
-      <section v-else class="workspace-empty" aria-labelledby="empty-workspace-title">
+      <section v-else-if="workspaceTab === 'tasks'" class="workspace-empty" aria-labelledby="empty-workspace-title">
         <div class="empty-illustration" aria-hidden="true">›_</div>
         <h2 id="empty-workspace-title">No task selected</h2>
         <p>Add a task in project settings, then start it here to stream its terminal output.</p>
@@ -279,7 +355,16 @@ const onCreateProjectFromSettings = (): void => {
         </button>
       </section>
 
-      <footer class="bottom-bar">
+      <AgentWorkspace
+        v-else-if="workspaceTab === 'agents' && project"
+        :config="config"
+        :project="project"
+        @save-config="onWorkspaceSaveConfig"
+      />
+
+      <GitWorkspace v-else-if="workspaceTab === 'git' && project" :project="project" :config="config" @save-config="onWorkspaceSaveConfig" />
+
+      <footer v-if="workspaceTab === 'tasks'" class="bottom-bar">
         <Toolbar
           :disabled="!selectedTask"
           :running="selectedTaskRunning"
@@ -296,7 +381,8 @@ const onCreateProjectFromSettings = (): void => {
           <span title="Memory usage">MEM {{ selectedTaskStats.memoryMb.toFixed(0) }} MB</span>
         </div>
       </footer>
-    </main>
+      </main>
+    </div>
   </div>
 
   <main v-else-if="loading" class="loading" aria-live="polite">
@@ -331,5 +417,12 @@ const onCreateProjectFromSettings = (): void => {
     v-if="newProjectOpen"
     @close="onCloseNewProject"
     @created="onProjectCreated"
+  />
+
+  <CloneRepositoryModal
+    v-if="cloneProjectOpen && config"
+    :preferences="config.preferences"
+    @close="cloneProjectOpen = false"
+    @cloned="onProjectCloned"
   />
 </template>

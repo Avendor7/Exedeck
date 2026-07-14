@@ -19,6 +19,7 @@ let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
 let resizeObserver: ResizeObserver | null = null
 let colorScheme: MediaQueryList | null = null
+let themeObserver: MutationObserver | null = null
 let renderedBuffer = ''
 let renderedTaskId = ''
 
@@ -67,7 +68,9 @@ function applyTerminalTheme(): void {
     return
   }
 
-  terminal.options.theme = colorScheme?.matches
+  const explicitTheme = document.documentElement.dataset.theme
+  const useLightTheme = explicitTheme === 'light' || (explicitTheme !== 'dark' && colorScheme?.matches)
+  terminal.options.theme = useLightTheme
     ? {
         background: '#f7f8fa',
         foreground: '#20232a',
@@ -124,6 +127,8 @@ onMounted(async () => {
 
   colorScheme = window.matchMedia('(prefers-color-scheme: light)')
   colorScheme.addEventListener('change', applyTerminalTheme)
+  themeObserver = new MutationObserver(applyTerminalTheme)
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   applyTerminalTheme()
 
   fitAddon = new FitAddon()
@@ -187,6 +192,8 @@ onBeforeUnmount(() => {
   containerRef.value?.removeEventListener('click', focusTerminal)
   colorScheme?.removeEventListener('change', applyTerminalTheme)
   colorScheme = null
+  themeObserver?.disconnect()
+  themeObserver = null
 
   terminal?.dispose()
   terminal = null

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { ProjectConfig, TaskConfig } from '../../shared/types'
+import type { AgentRuntimeSnapshot, AgentSession, ProjectConfig, TaskConfig } from '../../shared/types'
+
+type WorkspaceKind = 'tasks' | 'agents' | 'git'
 
 const props = defineProps<{
   projects: ProjectConfig[]
@@ -10,6 +12,9 @@ const props = defineProps<{
   filterText: string
   isRunning: (taskId: string) => boolean
   getStats: (taskId: string) => { cpu: number; memoryMb: number }
+  agentSessions: AgentSession[]
+  getAgentRuntime: (sessionId: string) => AgentRuntimeSnapshot
+  selectedWorkspace: WorkspaceKind
 }>()
 
 const emit = defineEmits<{
@@ -20,6 +25,8 @@ const emit = defineEmits<{
   updateFilter: [value: string]
   openProjectSettings: [projectId: string]
   createProject: []
+  cloneProject: []
+  selectWorkspace: [projectId: string, workspace: WorkspaceKind]
 }>()
 
 const formatCpu = (taskId: string): string => `${props.getStats(taskId).cpu.toFixed(1)}%`
@@ -33,6 +40,11 @@ interface ProjectView {
   tasks: TaskConfig[]
   runningCount: number
   collapsed: boolean
+  sessions: AgentSession[]
+  runningAgents: number
+  totalProcesses: number
+  showAgents: boolean
+  showGit: boolean
 }
 
 const projectViews = computed<ProjectView[]>(() => {
@@ -44,14 +56,23 @@ const projectViews = computed<ProjectView[]>(() => {
       ? project.tasks.filter((task) => task.name.toLowerCase().includes(query))
       : project.tasks
     const runningCount = project.tasks.filter((task) => props.isRunning(task.id)).length
+    const sessions = props.agentSessions.filter((session) => session.projectId === project.id)
+    const runningAgents = sessions.filter((session) => props.getAgentRuntime(session.id).state === 'running').length
+    const showAgents = !query || projectMatches || 'agents'.includes(query) || sessions.some((session) => session.title.toLowerCase().includes(query))
+    const showGit = !query || projectMatches || 'git repository changes branches worktrees'.includes(query)
 
     return {
       project,
       tasks,
       runningCount,
       collapsed: isCollapsed(project.id),
+      sessions,
+      runningAgents,
+      totalProcesses: project.tasks.length + sessions.length,
+      showAgents,
+      showGit,
     }
-  }).filter((view) => !query || view.project.name.toLowerCase().includes(query) || view.tasks.length > 0)
+  }).filter((view) => !query || view.project.name.toLowerCase().includes(query) || view.tasks.length > 0 || view.showAgents || view.showGit)
 })
 
 const onToggleProject = (projectId: string): void => {
@@ -98,10 +119,11 @@ defineExpose({ focusSearch })
           <span>New project</span>
           <span class="new-project-hint" aria-hidden="true">Create</span>
         </button>
+        <button type="button" class="clone-project-button" @click="emit('cloneProject')">Clone repository</button>
       </div>
     </div>
 
-    <nav class="sidebar-projects" aria-label="Project tasks">
+    <nav class="sidebar-projects" aria-label="Project workspaces and processes">
       <section v-for="view in projectViews" :key="view.project.id" class="project-group">
         <div class="project-row" :class="{ active: view.project.id === selectedProjectId }">
           <button
@@ -118,8 +140,8 @@ defineExpose({ focusSearch })
               </span>
               <span class="project-name">{{ view.project.name }}</span>
             </span>
-            <span class="project-summary" :title="`${view.runningCount} of ${view.project.tasks.length} tasks running`">
-              <span>{{ view.runningCount }}</span>/{{ view.project.tasks.length }}
+            <span class="project-summary" :title="`${view.runningCount + view.runningAgents} of ${view.totalProcesses} processes running`">
+              <span>{{ view.runningCount + view.runningAgents }}</span>/{{ view.totalProcesses }}
             </span>
           </button>
 
@@ -144,9 +166,9 @@ defineExpose({ focusSearch })
             v-for="task in view.tasks"
             :key="task.id"
             class="task-row"
-            :class="{ selected: task.id === selectedTaskId }"
+            :class="{ selected: task.id === selectedTaskId && selectedWorkspace === 'tasks' && view.project.id === selectedProjectId }"
             type="button"
-            :aria-current="task.id === selectedTaskId ? 'page' : undefined"
+            :aria-current="task.id === selectedTaskId && selectedWorkspace === 'tasks' ? 'page' : undefined"
             @click="emit('selectTask', view.project.id, task.id)"
             @dblclick="emit('start', task.id)"
           >
@@ -168,7 +190,37 @@ defineExpose({ focusSearch })
             <span v-else class="task-disclosure" aria-hidden="true">›</span>
           </button>
 
-          <p v-if="view.tasks.length === 0" class="empty-note">No matching tasks.</p>
+          <button
+            v-if="view.showAgents"
+            type="button"
+            class="task-row workspace-row"
+            :class="{ selected: selectedWorkspace === 'agents' && view.project.id === selectedProjectId }"
+            :aria-current="selectedWorkspace === 'agents' && view.project.id === selectedProjectId ? 'page' : undefined"
+            @click="emit('selectWorkspace', view.project.id, 'agents')"
+          >
+            <span class="task-left">
+              <span class="task-glyph agent-glyph" :class="{ running: view.runningAgents > 0 }" aria-hidden="true"><span>✦</span><i /></span>
+              <span class="task-copy"><span class="task-name">Agents</span><span class="workspace-subtitle">{{ view.runningAgents }} running · {{ view.sessions.length }} sessions</span></span>
+            </span>
+            <span class="task-disclosure" aria-hidden="true">›</span>
+          </button>
+
+          <button
+            v-if="view.showGit"
+            type="button"
+            class="task-row workspace-row"
+            :class="{ selected: selectedWorkspace === 'git' && view.project.id === selectedProjectId }"
+            :aria-current="selectedWorkspace === 'git' && view.project.id === selectedProjectId ? 'page' : undefined"
+            @click="emit('selectWorkspace', view.project.id, 'git')"
+          >
+            <span class="task-left">
+              <span class="task-glyph git-glyph" aria-hidden="true"><svg viewBox="0 0 20 20"><circle cx="6" cy="5" r="2"/><circle cx="14" cy="15" r="2"/><path d="M6 7v3c0 3 2 5 6 5M6 10h4c3 0 4-2 4-4V5"/></svg></span>
+              <span class="task-copy"><span class="task-name">Git</span><span class="workspace-subtitle">Changes, branches &amp; worktrees</span></span>
+            </span>
+            <span class="task-disclosure" aria-hidden="true">›</span>
+          </button>
+
+          <p v-if="view.tasks.length === 0 && !view.showAgents && !view.showGit" class="empty-note">No matching processes or workspaces.</p>
         </div>
       </section>
       <p v-if="projectViews.length === 0" class="sidebar-empty">No projects or tasks match your filter.</p>

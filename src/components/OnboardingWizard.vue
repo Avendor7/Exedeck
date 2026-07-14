@@ -49,7 +49,7 @@ function removeTask(taskId: string): void {
 }
 
 async function pickProjectPath(): Promise<void> {
-  const selectedPath = await window.exedeck.pickDirectory(projectPath.value || '.')
+  const selectedPath = await window.exedeck.projects.pickDirectory(projectPath.value || '.')
   if (selectedPath) {
     projectPath.value = selectedPath
   }
@@ -81,9 +81,20 @@ function submit(): void {
   }
 
   const nextConfig: AppConfig = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     onboardingCompleted: true,
     projects: [nextProject],
+    preferences: {
+      appearance: 'system',
+      editorCommand: '',
+      cloneDirectory: '',
+      aiProfileId: 'agent-profile-codex',
+    },
+    agentProfiles: [
+      { id: 'agent-profile-codex', name: 'Codex', tool: 'codex', command: 'codex', args: [], enabled: true },
+      { id: 'agent-profile-claude', name: 'Claude', tool: 'claude', command: 'claude', args: [], enabled: true },
+    ],
+    agentSessions: [],
   }
 
   emit('complete', nextConfig)
@@ -93,7 +104,7 @@ const canSubmit = computed(() => Boolean(projectName.value.trim() && projectPath
 
 onMounted(async () => {
   try {
-    const defaultDirectory = await window.exedeck.projectDefaultDirectory()
+    const defaultDirectory = await window.exedeck.projects.defaultDirectory()
     if (defaultDirectory.trim()) {
       projectPath.value = defaultDirectory
     }

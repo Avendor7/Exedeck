@@ -19,12 +19,16 @@ interface DraftProject {
   framework: ProjectConfig['framework']
   autoStart: boolean
   tasks: DraftTask[]
+  branchParents: Record<string, string>
 }
 
 interface DraftConfig {
   schemaVersion: number
   onboardingCompleted: boolean
   projects: DraftProject[]
+  preferences: AppConfig['preferences']
+  agentProfiles: AppConfig['agentProfiles']
+  agentSessions: AppConfig['agentSessions']
 }
 
 const props = defineProps<{
@@ -56,6 +60,7 @@ function toDraftProject(project: ProjectConfig): DraftProject {
     framework: project.framework ?? 'custom',
     autoStart: project.autoStart,
     tasks: project.tasks.map(toDraftTask),
+    branchParents: { ...project.branchParents },
   }
 }
 
@@ -64,6 +69,9 @@ function toDraftConfig(config: AppConfig): DraftConfig {
     schemaVersion: config.schemaVersion,
     onboardingCompleted: config.onboardingCompleted,
     projects: config.projects.map(toDraftProject),
+    preferences: { ...config.preferences },
+    agentProfiles: config.agentProfiles.map((profile) => ({ ...profile, args: [...profile.args] })),
+    agentSessions: config.agentSessions.map((session) => ({ ...session })),
   }
 }
 
@@ -105,6 +113,7 @@ function addProject(): void {
     framework: 'custom',
     autoStart: false,
     tasks: [createDraftTask()],
+    branchParents: {},
   }
 
   draft.value.projects.push(next)
@@ -145,6 +154,27 @@ function addTask(): void {
   currentProject.value.tasks.push(createDraftTask())
 }
 
+function addAgentProfile(): void {
+  draft.value.agentProfiles.push({
+    id: createId('agent-profile'),
+    name: 'Custom agent',
+    tool: 'custom',
+    command: '',
+    args: [],
+    enabled: true,
+  })
+}
+
+function removeAgentProfile(profileId: string): void {
+  if (draft.value.agentSessions.some((session) => session.profileId === profileId)) {
+    return
+  }
+  draft.value.agentProfiles = draft.value.agentProfiles.filter((profile) => profile.id !== profileId)
+  if (draft.value.preferences.aiProfileId === profileId) {
+    draft.value.preferences.aiProfileId = draft.value.agentProfiles[0]?.id ?? ''
+  }
+}
+
 function removeTask(taskId: string): void {
   if (!currentProject.value) {
     return
@@ -158,7 +188,7 @@ async function pickProjectPath(): Promise<void> {
     return
   }
 
-  const selectedPath = await window.exedeck.pickDirectory(currentProject.value.path || '.')
+  const selectedPath = await window.exedeck.projects.pickDirectory(currentProject.value.path || '.')
   if (selectedPath) {
     currentProject.value.path = selectedPath
   }
@@ -181,12 +211,16 @@ function saveDraft(): void {
         cwd: project.path.trim() || '.',
         autoStart: task.autoStart,
       })),
+    branchParents: { ...project.branchParents },
   }))
 
   const nextConfig: AppConfig = {
     schemaVersion: draft.value.schemaVersion,
     onboardingCompleted: nextProjects.length > 0,
     projects: nextProjects,
+    preferences: { ...draft.value.preferences },
+    agentProfiles: draft.value.agentProfiles.map((profile) => ({ ...profile, args: [...profile.args] })),
+    agentSessions: draft.value.agentSessions.map((session) => ({ ...session })),
   }
 
   const nextSelectedProjectId =
@@ -251,6 +285,50 @@ function saveDraft(): void {
         </aside>
 
         <section class="settings-editor" v-if="currentProject">
+          <div class="task-editor-head">
+            <h3>Application</h3>
+          </div>
+          <div class="form-grid settings-global-grid">
+            <label>
+              <span>Appearance</span>
+              <select v-model="draft.preferences.appearance">
+                <option value="system">System</option>
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </label>
+            <label>
+              <span>Editor command</span>
+              <input v-model="draft.preferences.editorCommand" type="text" placeholder="code" />
+            </label>
+            <label>
+              <span>Default clone directory</span>
+              <input v-model="draft.preferences.cloneDirectory" type="text" placeholder="/home/me/Code" />
+            </label>
+            <label>
+              <span>AI Git profile</span>
+              <select v-model="draft.preferences.aiProfileId">
+                <option v-for="profile in draft.agentProfiles" :key="profile.id" :value="profile.id">{{ profile.name }}</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="task-editor-head">
+            <h3>Agent tools</h3>
+            <button type="button" class="small" @click="addAgentProfile">Add Custom</button>
+          </div>
+          <div class="agent-profile-grid">
+            <article v-for="profile in draft.agentProfiles" :key="profile.id" class="task-card compact-card">
+              <div class="task-grid">
+                <label><span>Name</span><input v-model="profile.name" type="text" /></label>
+                <label><span>Command</span><input v-model="profile.command" type="text" /></label>
+                <label><span>Arguments</span><input :value="formatArgs(profile.args)" type="text" @input="profile.args = parseArgs(($event.target as HTMLInputElement).value)" /></label>
+                <label class="inline-checkbox"><input v-model="profile.enabled" type="checkbox" /><span>Enabled</span></label>
+              </div>
+              <button v-if="profile.tool === 'custom'" type="button" class="danger small" :disabled="draft.agentSessions.some((session) => session.profileId === profile.id)" @click="removeAgentProfile(profile.id)">Remove</button>
+            </article>
+          </div>
+
           <div class="form-grid">
             <label>
               <span>Project name</span>

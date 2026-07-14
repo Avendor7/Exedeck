@@ -1,21 +1,5 @@
-import * as pty from 'node-pty'
-import kill from 'tree-kill'
-import type {
-  AppConfig,
-  TaskConfig,
-  TaskDataEvent,
-  TaskExitEvent,
-  TaskStatusEvent,
-} from '../shared/types'
-
-interface TaskRuntime {
-  task: TaskConfig
-  process?: pty.IPty
-  running: boolean
-  buffer: string
-  cols: number
-  rows: number
-}
+import type { AppConfig, TaskConfig, TaskDataEvent, TaskExitEvent, TaskStatusEvent } from '../shared/types'
+import { ProcessRuntimeManager } from './processRuntime'
 
 interface TaskManagerOptions {
   getConfig: () => AppConfig
@@ -25,330 +9,93 @@ interface TaskManagerOptions {
   maxBufferChars?: number
 }
 
-interface ResolvedTask {
-  task: TaskConfig
-  cwd: string
-}
-
 export class TaskManager {
-  private readonly getConfig: () => AppConfig
-  private readonly onData: (event: TaskDataEvent) => void
-  private readonly onStatus: (event: TaskStatusEvent) => void
-  private readonly onExit: (event: TaskExitEvent) => void
-  private readonly maxBufferChars: number
-  private readonly defaultCols = 120
-  private readonly defaultRows = 30
-  private readonly runtimes = new Map<string, TaskRuntime>()
+  private readonly runtime: ProcessRuntimeManager
 
-  constructor(options: TaskManagerOptions) {
-    this.getConfig = options.getConfig
-    this.onData = options.onData
-    this.onStatus = options.onStatus
-    this.onExit = options.onExit
-    this.maxBufferChars = options.maxBufferChars ?? 250_000
+  constructor(private readonly options: TaskManagerOptions) {
+    this.runtime = new ProcessRuntimeManager({
+      maxBufferChars: options.maxBufferChars,
+      onData: (taskId, chunk) => options.onData({ taskId, chunk }),
+      onStatus: (taskId, running) => options.onStatus({ taskId, running }),
+      onExit: ({ processId, exitCode, signal }) => options.onExit({ taskId: processId, exitCode, signal }),
+    })
   }
 
   startTask(taskId: string): boolean {
     const resolved = this.findTask(taskId)
-    if (!resolved) {
-      return false
-    }
-
-    const { task, cwd } = resolved
-    if (!task.command.trim()) {
-      return false
-    }
-
-    const runtime = this.ensureRuntime(task)
-    if (runtime.running) {
-      return true
-    }
-
-    let child: pty.IPty
-    try {
-      let spawnCommand = task.command
-      let spawnArgs = task.args
-      if (process.platform === 'win32') {
-        spawnCommand = process.env.ComSpec || 'cmd.exe'
-        spawnArgs = ['/d', '/s', '/c', task.command, ...task.args]
-      }
-      child = pty.spawn(spawnCommand, spawnArgs, {
-        name: 'xterm-256color',
-        cols: runtime.cols,
-        rows: runtime.rows,
-        cwd,
-        env: {
-          ...process.env,
-          TERM: 'xterm-256color',
-        },
-      })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      const chunk = `\r\n[exedeck] Failed to start task "${task.name}": ${message}\r\n`
-      runtime.buffer = this.pushToBuffer(runtime.buffer, chunk)
-      this.onData({ taskId, chunk })
-      this.onStatus({ taskId, running: false })
-      return false
-    }
-
-    runtime.process = child
-    runtime.running = true
-    runtime.task = task
-    this.onStatus({ taskId, running: true })
-
-    child.onData((chunk) => {
-      runtime.buffer = this.pushToBuffer(runtime.buffer, chunk)
-      this.onData({ taskId, chunk })
-    })
-
-    child.onExit(({ exitCode, signal }) => {
-      runtime.running = false
-      runtime.process = undefined
-      this.onStatus({ taskId, running: false })
-      this.onExit({ taskId, exitCode, signal })
-    })
-
-    return true
+    return resolved ? this.runtime.start(this.toDefinition(resolved.task, resolved.projectPath)) : false
   }
 
-  async stopTask(taskId: string): Promise<boolean> {
-    const runtime = this.runtimes.get(taskId)
-    if (!runtime || !runtime.running || !runtime.process) {
-      return true
-    }
+  stopTask(taskId: string): Promise<boolean> { return this.runtime.stop(taskId) }
 
-    const child = runtime.process
-    try {
-      child.write('\u0003')
-    } catch {
-      // The PTY may have exited between the runtime check and the write.
-    }
-
-    const stoppedByCtrlC = await this.waitForExit(taskId, 1500)
-    if (stoppedByCtrlC) {
-      return true
-    }
-
-    await this.killTree(child.pid)
-    await this.waitForExit(taskId, 1000)
-    return !runtime.running
+  restartTask(taskId: string): Promise<boolean> {
+    const resolved = this.findTask(taskId)
+    return resolved
+      ? this.runtime.restart(this.toDefinition(resolved.task, resolved.projectPath))
+      : Promise.resolve(false)
   }
 
-  async restartTask(taskId: string): Promise<boolean> {
-    const stopped = await this.stopTask(taskId)
-    if (!stopped) {
-      return false
-    }
-    return this.startTask(taskId)
-  }
-
-  inputTask(taskId: string, data: string): boolean {
-    const runtime = this.runtimes.get(taskId)
-    if (!runtime || !runtime.running || !runtime.process) {
-      return false
-    }
-
-    try {
-      runtime.process.write(data)
-      return true
-    } catch {
-      return false
-    }
-  }
+  inputTask(taskId: string, data: string): boolean { return this.runtime.input(taskId, data) }
 
   resizeTask(taskId: string, cols: number, rows: number): boolean {
     const resolved = this.findTask(taskId)
-    if (!resolved) {
-      return false
-    }
-
-    const runtime = this.ensureRuntime(resolved.task)
-    const safeCols = Number.isFinite(cols)
-      ? Math.min(1000, Math.max(20, Math.floor(cols)))
-      : this.defaultCols
-    const safeRows = Number.isFinite(rows)
-      ? Math.min(500, Math.max(5, Math.floor(rows)))
-      : this.defaultRows
-
-    runtime.cols = safeCols
-    runtime.rows = safeRows
-
-    if (runtime.process) {
-      try {
-        runtime.process.resize(safeCols, safeRows)
-      } catch {
-        return false
-      }
-    }
-
-    return true
+    if (!resolved) return false
+    this.runtime.ensure(this.toDefinition(resolved.task, resolved.projectPath))
+    return this.runtime.resize(taskId, cols, rows)
   }
 
-  getTaskBuffer(taskId: string): string {
-    return this.runtimes.get(taskId)?.buffer ?? ''
-  }
+  getTaskBuffer(taskId: string): string { return this.runtime.getBuffer(taskId) }
 
   clearTaskBuffer(taskId: string): boolean {
-    const runtime = this.runtimes.get(taskId)
-    if (!runtime) {
-      const resolved = this.findTask(taskId)
-      if (!resolved) {
-        return false
-      }
-      this.runtimes.set(taskId, {
-        task: resolved.task,
-        running: false,
-        buffer: '',
-        cols: this.defaultCols,
-        rows: this.defaultRows,
-      })
-      return true
+    const resolved = this.findTask(taskId)
+    if (!resolved) return false
+    this.runtime.ensure(this.toDefinition(resolved.task, resolved.projectPath))
+    return this.runtime.clearBuffer(taskId)
+  }
+
+  isTaskRunning(taskId: string): boolean { return this.runtime.isRunning(taskId) }
+  getTaskPid(taskId: string): number | undefined { return this.runtime.getPid(taskId) }
+  getTaskStatus(taskId: string): { running: boolean; pid?: number } { return this.runtime.getStatus(taskId) }
+  listRunningTaskIds(): string[] { return this.runtime.listRunningIds() }
+
+  getRunningProjectIds(): Set<string> {
+    const result = new Set<string>()
+    for (const project of this.options.getConfig().projects) {
+      if (project.tasks.some((task) => this.runtime.isRunning(task.id))) result.add(project.id)
     }
-
-    runtime.buffer = ''
-    return true
-  }
-
-  isTaskRunning(taskId: string): boolean {
-    return this.runtimes.get(taskId)?.running ?? false
-  }
-
-  getTaskPid(taskId: string): number | undefined {
-    return this.runtimes.get(taskId)?.process?.pid
-  }
-
-  getTaskStatus(taskId: string): { running: boolean; pid?: number } {
-    const runtime = this.runtimes.get(taskId)
-    return {
-      running: runtime?.running ?? false,
-      ...(runtime?.process?.pid ? { pid: runtime.process.pid } : {}),
-    }
-  }
-
-  listRunningTaskIds(): string[] {
-    return Array.from(this.runtimes.entries())
-      .filter(([, runtime]) => runtime.running)
-      .map(([taskId]) => taskId)
+    return result
   }
 
   async reconcileConfig(nextConfig: AppConfig): Promise<void> {
-    const nextTasks = new Map<string, TaskConfig>()
+    const nextTasks = new Map<string, { task: TaskConfig; projectPath: string }>()
     for (const project of nextConfig.projects) {
-      for (const task of project.tasks) {
-        nextTasks.set(task.id, task)
-      }
+      for (const task of project.tasks) nextTasks.set(task.id, { task, projectPath: project.path })
     }
-
-    const tasksToStop = Array.from(this.runtimes.entries())
-      .filter(([, runtime]) => {
-        if (!runtime.running) {
-          return false
-        }
-
-        const nextTask = nextTasks.get(runtime.task.id)
-        return (
-          !nextTask ||
-          nextTask.command !== runtime.task.command ||
-          nextTask.cwd !== runtime.task.cwd ||
-          nextTask.args.join('\0') !== runtime.task.args.join('\0')
-        )
-      })
-      .map(([taskId]) => taskId)
-
-    await Promise.all(tasksToStop.map((taskId) => this.stopTask(taskId)))
-
-    for (const [taskId, runtime] of this.runtimes) {
-      const nextTask = nextTasks.get(taskId)
-      if (nextTask) {
-        runtime.task = nextTask
-      } else if (!runtime.running) {
-        this.runtimes.delete(taskId)
-      }
+    const toStop = this.runtime.listRunningIds().filter((id) => {
+      const current = this.findTask(id)
+      const next = nextTasks.get(id)
+      return !current || !next || current.projectPath !== next.projectPath ||
+        current.task.command !== next.task.command || current.task.args.join('\0') !== next.task.args.join('\0')
+    })
+    await Promise.all(toStop.map((id) => this.runtime.stop(id)))
+    for (const id of this.runtime.listRunningIds()) {
+      const next = nextTasks.get(id)
+      if (next) this.runtime.ensure(this.toDefinition(next.task, next.projectPath))
     }
   }
 
-  async stopAll(): Promise<void> {
-    await Promise.all(this.listRunningTaskIds().map((taskId) => this.stopTask(taskId)))
-  }
+  stopAll(): Promise<void> { return this.runtime.stopAll() }
+  killAllImmediately(): void { this.runtime.killAllImmediately() }
 
-  killAllImmediately(): void {
-    for (const runtime of this.runtimes.values()) {
-      if (!runtime.process) {
-        continue
-      }
-
-      try {
-        runtime.process.kill()
-      } catch {
-        // The operating system may already have reaped the child process.
-      }
-      runtime.running = false
-      runtime.process = undefined
-    }
-  }
-
-  private ensureRuntime(task: TaskConfig): TaskRuntime {
-    const existing = this.runtimes.get(task.id)
-    if (existing) {
-      existing.task = task
-      return existing
-    }
-
-    const runtime: TaskRuntime = {
-      task,
-      running: false,
-      buffer: '',
-      cols: this.defaultCols,
-      rows: this.defaultRows,
-    }
-    this.runtimes.set(task.id, runtime)
-    return runtime
-  }
-
-  private findTask(taskId: string): ResolvedTask | undefined {
-    for (const project of this.getConfig().projects) {
+  private findTask(taskId: string): { task: TaskConfig; projectPath: string } | undefined {
+    for (const project of this.options.getConfig().projects) {
       const task = project.tasks.find((item) => item.id === taskId)
-      if (task) {
-        return {
-          task,
-          cwd: project.path,
-        }
-      }
+      if (task) return { task, projectPath: project.path }
     }
-
     return undefined
   }
 
-  private pushToBuffer(existing: string, chunk: string): string {
-    const combined = existing + chunk
-    if (combined.length <= this.maxBufferChars) {
-      return combined
-    }
-
-    return combined.slice(combined.length - this.maxBufferChars)
-  }
-
-  private waitForExit(taskId: string, timeoutMs: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const start = Date.now()
-      const timer = setInterval(() => {
-        if (!this.isTaskRunning(taskId)) {
-          clearInterval(timer)
-          resolve(true)
-          return
-        }
-
-        if (Date.now() - start >= timeoutMs) {
-          clearInterval(timer)
-          resolve(false)
-        }
-      }, 50)
-    })
-  }
-
-  private killTree(pid: number): Promise<void> {
-    return new Promise((resolve) => {
-      kill(pid, 'SIGTERM', () => resolve())
-    })
+  private toDefinition(task: TaskConfig, projectPath: string) {
+    return { id: task.id, name: task.name, command: task.command, args: task.args, cwd: projectPath }
   }
 }

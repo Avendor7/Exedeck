@@ -17,9 +17,11 @@ Instructions for AI coding agents working on Exedeck (Electron + Vue + Vite).
 ## Repository layout (single source of truth)
 - `electron/main.ts` — app lifecycle, IPC handlers, auto-start logic, smoke test handshake.
 - `electron/config.ts` — config schema/migration, persistent `exedeck.config.json` in `app.getPath('userData')`, helpers for normalize/save/load.
-- `electron/taskManager.ts` — PTY lifecycle (`node-pty`), Ctrl+C + tree kill, buffer retention, streaming events back to renderer.
-- `electron/preload.ts` — secure `contextBridge` exposures for config, task control, dialogs, and event subscriptions.
-- `shared/types.ts` — App/Project/Task schema plus `ExedeckApi` and every IPC event payload.
+- `electron/processRuntime.ts` — shared PTY lifecycle (`node-pty`), Ctrl+C + tree kill, buffer retention, and streaming events.
+- `electron/taskManager.ts`, `electron/agentManager.ts` — task and agent adapters over the shared runtime.
+- `electron/gitService.ts` — checkout resolution, bounded Git runner/parsers, and serialized mutations.
+- `electron/preload.ts` — secure `contextBridge` domains for projects, processes, agents, Git, AI, dialogs, and subscriptions.
+- `shared/types.ts` — schema v4 plus domain APIs and every IPC event payload.
 - `src/` — Vue renderer (see `App.vue`, `src/components/*`, `src/state/store.ts`, `src/main.ts`).
 - `build/`, `release/` — assets and build outputs controlled by `electron-builder` config in `package.json`.
 

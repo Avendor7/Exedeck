@@ -57,4 +57,24 @@ describe('configuration persistence', () => {
     expect(stored).toEqual(config)
     expect((await readdir(directory)).some((file) => file.endsWith('.tmp'))).toBe(false)
   })
+
+  it('migrates schema v3 projects and tasks to v4 without losing them', () => {
+    const root = path.resolve('/tmp/exedeck-migration')
+    const migrated = normalizeConfig({
+      schemaVersion: 3,
+      onboardingCompleted: true,
+      projects: [{
+        id: 'project-existing',
+        name: 'Existing project',
+        path: root,
+        tasks: [{ id: 'task-existing', name: 'Dev', command: 'npm', args: ['run', 'dev'] }],
+      }],
+    }, root)
+
+    expect(migrated.schemaVersion).toBe(4)
+    expect(migrated.projects[0].id).toBe('project-existing')
+    expect(migrated.projects[0].tasks[0].id).toBe('task-existing')
+    expect(migrated.agentProfiles.map((profile) => profile.tool)).toEqual(['codex', 'claude'])
+    expect(migrated.preferences.appearance).toBe('system')
+  })
 })

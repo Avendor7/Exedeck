@@ -1,5 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
-import type { IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
+import type { IpcMainInvokeEvent } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,7 +13,21 @@ import {
 } from './config'
 import { ProvisioningJobManager } from './provisioningJobManager'
 import { TaskManager } from './taskManager'
-import type { AppConfig, ProjectCreateDoneEvent, ProjectCreateRequest, TaskConfig } from '../shared/types'
+import { AgentManager } from './agentManager'
+import { AiService } from './aiService'
+import { GitService } from './gitService'
+import { spawn } from 'node:child_process'
+import type {
+  AgentStartRequest,
+  AppConfig,
+  GitBranchCreateRequest,
+  GitCloneRequest,
+  GitWorktreeCreateRequest,
+  ProjectCreateDoneEvent,
+  ProjectCreateRequest,
+  TaskConfig,
+  WindowCommand,
+} from '../shared/types'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -40,6 +54,73 @@ function assertTrustedIpc(event: IpcMainInvokeEvent): void {
 
 function isSafeId(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 128
+}
+
+function isBoundedString(value: unknown, maxLength = 4096): value is string {
+  return typeof value === 'string' && !value.includes('\0') && value.length <= maxLength
+}
+
+function normalizeBranchRequest(value: unknown): GitBranchCreateRequest | null {
+  if (!value || typeof value !== 'object') return null
+  const source = value as Record<string, unknown>
+  if (!isBoundedString(source.checkoutId, 256) || !isBoundedString(source.name, 240)) return null
+  if (source.startPoint !== undefined && !isBoundedString(source.startPoint, 240)) return null
+  return {
+    checkoutId: source.checkoutId,
+    name: source.name,
+    switchTo: source.switchTo === true,
+    ...(typeof source.startPoint === 'string' ? { startPoint: source.startPoint } : {}),
+  }
+}
+
+function normalizeWorktreeRequest(value: unknown): GitWorktreeCreateRequest | null {
+  if (!value || typeof value !== 'object') return null
+  const source = value as Record<string, unknown>
+  if (!isSafeId(source.projectId) || !isBoundedString(source.path) || !isBoundedString(source.branch, 240)) return null
+  if (source.startPoint !== undefined && !isBoundedString(source.startPoint, 240)) return null
+  return {
+    projectId: source.projectId,
+    path: source.path,
+    branch: source.branch,
+    createBranch: source.createBranch === true,
+    ...(typeof source.startPoint === 'string' ? { startPoint: source.startPoint } : {}),
+  }
+}
+
+function normalizeCloneRequest(value: unknown): GitCloneRequest | null {
+  if (!value || typeof value !== 'object') return null
+  const source = value as Record<string, unknown>
+  if (!isBoundedString(source.url) || !isBoundedString(source.directory)) return null
+  if (source.name !== undefined && !isBoundedString(source.name, 120)) return null
+  return { url: source.url, directory: source.directory, ...(typeof source.name === 'string' ? { name: source.name } : {}) }
+}
+
+async function openPathExternal(targetPath: string, target: unknown): Promise<boolean> {
+  if (target === 'files') return (await shell.openPath(targetPath)) === ''
+  if (target === 'editor' && appConfig.preferences.editorCommand) {
+    spawn(appConfig.preferences.editorCommand, [targetPath], { detached: true, stdio: 'ignore' }).unref()
+    return true
+  }
+  if (target === 'terminal') {
+    if (process.platform === 'win32') {
+      spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 'start', '', 'cmd.exe', '/k', 'cd', '/d', targetPath], {
+        detached: true,
+        stdio: 'ignore',
+      }).unref()
+    } else {
+      spawn('x-terminal-emulator', ['--working-directory', targetPath], { detached: true, stdio: 'ignore' }).unref()
+    }
+    return true
+  }
+  return false
+}
+
+function windowState(win: BrowserWindow) {
+  return { maximized: win.isMaximized(), fullscreen: win.isFullScreen() }
+}
+
+function sendWindowState(win: BrowserWindow): void {
+  if (!win.isDestroyed()) win.webContents.send('window:state', windowState(win))
 }
 
 function normalizeProjectCreateRequest(value: unknown): ProjectCreateRequest | null {
@@ -102,6 +183,26 @@ const taskManager = new TaskManager({
     mainWindow?.webContents.send('task:exit', event)
   },
 })
+
+let agentManager: AgentManager
+const gitService = new GitService({
+  getConfig: () => appConfig,
+  isCheckoutBusy: (checkoutId) => {
+    const projectId = checkoutId.split(':')[0]
+    const taskBusy = checkoutId === `${projectId}:root` && taskManager.getRunningProjectIds().has(projectId)
+    return taskBusy || Boolean(agentManager?.isCheckoutBusy(checkoutId))
+  },
+})
+
+agentManager = new AgentManager({
+  getConfig: () => appConfig,
+  resolveCheckout: (checkoutId) => gitService.resolveCheckout(checkoutId),
+  onData: (event) => mainWindow?.webContents.send('agent:data', event),
+  onStatus: (event) => mainWindow?.webContents.send('agent:status', event),
+  onExit: (event) => mainWindow?.webContents.send('agent:exit', event),
+})
+
+const aiService = new AiService(() => appConfig, gitService)
 
 const provisioningJobManager = new ProvisioningJobManager({
   onData: (event) => {
@@ -170,6 +271,7 @@ function registerIpcHandlers(): void {
     assertTrustedIpc(event)
     const nextConfig = normalizeConfig(candidate, repoRoot)
     await taskManager.reconcileConfig(nextConfig)
+    await agentManager.reconcileConfig(nextConfig)
     appConfig = nextConfig
     await saveConfig(app.getPath('userData'), appConfig)
     return appConfig
@@ -223,6 +325,12 @@ function registerIpcHandlers(): void {
     assertTrustedIpc(event)
     return isSafeId(jobId) ? provisioningJobManager.getStatus(jobId) : null
   })
+  ipcMain.handle('project:open-external', async (event, projectId: unknown, target: unknown) => {
+    assertTrustedIpc(event)
+    if (!isSafeId(projectId)) return false
+    const project = appConfig.projects.find((item) => item.id === projectId)
+    return project ? openPathExternal(project.path, target) : false
+  })
 
   ipcMain.handle('task:start', async (event, taskId: unknown) => {
     assertTrustedIpc(event)
@@ -259,6 +367,136 @@ function registerIpcHandlers(): void {
   ipcMain.handle('task:clear-buffer', async (event, taskId: unknown) => {
     assertTrustedIpc(event)
     return isSafeId(taskId) ? taskManager.clearTaskBuffer(taskId) : false
+  })
+
+  ipcMain.handle('agent:discover-tools', async (event) => {
+    assertTrustedIpc(event)
+    return agentManager.discoverTools()
+  })
+  ipcMain.handle('agent:start', async (event, candidate: unknown) => {
+    assertTrustedIpc(event)
+    if (!candidate || typeof candidate !== 'object') return false
+    const request = candidate as Partial<AgentStartRequest>
+    return isSafeId(request.sessionId) && (request.prompt === undefined || (typeof request.prompt === 'string' && request.prompt.length <= 32_000))
+      ? agentManager.start(request.sessionId, request.prompt)
+      : false
+  })
+  ipcMain.handle('agent:stop', async (event, sessionId: unknown) => {
+    assertTrustedIpc(event); return isSafeId(sessionId) ? agentManager.stop(sessionId) : false
+  })
+  ipcMain.handle('agent:restart', async (event, sessionId: unknown) => {
+    assertTrustedIpc(event); return isSafeId(sessionId) ? agentManager.restart(sessionId) : false
+  })
+  ipcMain.handle('agent:input', async (event, sessionId: unknown, data: unknown) => {
+    assertTrustedIpc(event); return isSafeId(sessionId) && typeof data === 'string' && data.length <= 65_536
+      ? agentManager.input(sessionId, data) : false
+  })
+  ipcMain.handle('agent:resize', async (event, sessionId: unknown, cols: unknown, rows: unknown) => {
+    assertTrustedIpc(event); return isSafeId(sessionId) && typeof cols === 'number' && typeof rows === 'number'
+      ? agentManager.resize(sessionId, cols, rows) : false
+  })
+  ipcMain.handle('agent:get-status', async (event, sessionId: unknown) => {
+    assertTrustedIpc(event); return isSafeId(sessionId) ? agentManager.getStatus(sessionId) : { state: 'stopped', unread: false }
+  })
+  ipcMain.handle('agent:get-buffer', async (event, sessionId: unknown) => {
+    assertTrustedIpc(event); return isSafeId(sessionId) ? agentManager.getBuffer(sessionId) : ''
+  })
+  ipcMain.handle('agent:clear-buffer', async (event, sessionId: unknown) => {
+    assertTrustedIpc(event); return isSafeId(sessionId) ? agentManager.clearBuffer(sessionId) : false
+  })
+  ipcMain.handle('agent:mark-read', async (event, sessionId: unknown) => {
+    assertTrustedIpc(event); return isSafeId(sessionId) ? agentManager.markRead(sessionId) : false
+  })
+
+  ipcMain.handle('git:list-checkouts', async (event, projectId: unknown) => {
+    assertTrustedIpc(event); return isSafeId(projectId) ? gitService.listCheckouts(projectId) : []
+  })
+  ipcMain.handle('git:status', async (event, checkoutId: unknown) => {
+    assertTrustedIpc(event); return typeof checkoutId === 'string' ? gitService.status(checkoutId) : null
+  })
+  ipcMain.handle('git:history', async (event, checkoutId: unknown, limit: unknown) => {
+    assertTrustedIpc(event); return typeof checkoutId === 'string' ? gitService.history(checkoutId, typeof limit === 'number' ? limit : 100) : []
+  })
+  ipcMain.handle('git:branches', async (event, checkoutId: unknown) => {
+    assertTrustedIpc(event); return typeof checkoutId === 'string' ? gitService.branches(checkoutId) : []
+  })
+  const paths = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').slice(0, 500) : []
+  ipcMain.handle('git:stage', async (event, id: unknown, value: unknown) => { assertTrustedIpc(event); return typeof id === 'string' ? gitService.stage(id, paths(value)) : null })
+  ipcMain.handle('git:unstage', async (event, id: unknown, value: unknown) => { assertTrustedIpc(event); return typeof id === 'string' ? gitService.unstage(id, paths(value)) : null })
+  ipcMain.handle('git:discard', async (event, id: unknown, value: unknown) => { assertTrustedIpc(event); return typeof id === 'string' ? gitService.discard(id, paths(value)) : null })
+  ipcMain.handle('git:stash', async (event, id: unknown, message: unknown) => { assertTrustedIpc(event); return typeof id === 'string' ? gitService.stash(id, typeof message === 'string' ? message : undefined) : null })
+  ipcMain.handle('git:stash-pop', async (event, id: unknown) => { assertTrustedIpc(event); return typeof id === 'string' ? gitService.stashPop(id) : null })
+  ipcMain.handle('git:commit', async (event, id: unknown, summary: unknown, description: unknown) => { assertTrustedIpc(event); return typeof id === 'string' && typeof summary === 'string' ? gitService.commit(id, summary, typeof description === 'string' ? description : undefined) : null })
+  ipcMain.handle('git:create-branch', async (event, value: unknown) => { assertTrustedIpc(event); const request = normalizeBranchRequest(value); return request ? gitService.createBranch(request) : null })
+  ipcMain.handle('git:switch-branch', async (event, id: unknown, branch: unknown) => { assertTrustedIpc(event); return isBoundedString(id, 256) && isBoundedString(branch, 240) ? gitService.switchBranch(id, branch) : null })
+  ipcMain.handle('git:delete-branch', async (event, id: unknown, branch: unknown) => { assertTrustedIpc(event); return isBoundedString(id, 256) && isBoundedString(branch, 240) ? gitService.deleteBranch(id, branch) : null })
+  ipcMain.handle('git:rename-branch', async (event, id: unknown, oldName: unknown, newName: unknown) => { assertTrustedIpc(event); return isBoundedString(id, 256) && isBoundedString(oldName, 240) && isBoundedString(newName, 240) ? gitService.renameBranch(id, oldName, newName) : null })
+  ipcMain.handle('git:merge-branch', async (event, id: unknown, branch: unknown) => { assertTrustedIpc(event); return isBoundedString(id, 256) && isBoundedString(branch, 240) ? gitService.mergeBranch(id, branch) : null })
+  ipcMain.handle('git:fetch', async (event, id: unknown) => { assertTrustedIpc(event); return isBoundedString(id, 256) ? gitService.fetch(id) : null })
+  ipcMain.handle('git:pull', async (event, id: unknown) => { assertTrustedIpc(event); return isBoundedString(id, 256) ? gitService.pull(id) : null })
+  ipcMain.handle('git:push', async (event, id: unknown) => { assertTrustedIpc(event); return isBoundedString(id, 256) ? gitService.push(id) : null })
+  ipcMain.handle('git:create-worktree', async (event, value: unknown) => { assertTrustedIpc(event); const request = normalizeWorktreeRequest(value); return request ? gitService.createWorktree(request) : null })
+  ipcMain.handle('git:remove-worktree', async (event, id: unknown) => { assertTrustedIpc(event); return isBoundedString(id, 256) ? gitService.removeWorktree(id) : null })
+  ipcMain.handle('git:clone', async (event, value: unknown) => {
+    assertTrustedIpc(event)
+    const request = normalizeCloneRequest(value)
+    if (!request) return null
+    const project = await gitService.clone(request)
+    if (!project) return null
+    const next = normalizeConfig({ ...appConfig, onboardingCompleted: true, projects: [...appConfig.projects, project] }, repoRoot)
+    await saveConfig(app.getPath('userData'), next)
+    appConfig = next
+    return project
+  })
+  ipcMain.handle('git:open-external', async (event, id: unknown, target: unknown) => {
+    assertTrustedIpc(event)
+    if (!isBoundedString(id, 256)) return false
+    const checkout = await gitService.resolveCheckout(id)
+    if (!checkout || (target !== 'editor' && target !== 'terminal' && target !== 'files')) return false
+    return openPathExternal(checkout.path, target)
+  })
+  ipcMain.handle('ai:generate-commit-message', async (event, id: unknown) => {
+    assertTrustedIpc(event); if (!isBoundedString(id, 256)) throw new Error('Invalid checkout.'); return aiService.generateCommitMessage(id)
+  })
+
+  ipcMain.handle('window:get-state', async (event) => {
+    assertTrustedIpc(event)
+    return mainWindow ? windowState(mainWindow) : { maximized: false, fullscreen: false }
+  })
+  ipcMain.handle('window:command', async (event, value: unknown) => {
+    assertTrustedIpc(event)
+    if (!mainWindow || typeof value !== 'string') return false
+    const command = value as WindowCommand
+    const webContents = mainWindow.webContents
+    switch (command) {
+      case 'minimize': mainWindow.minimize(); break
+      case 'maximize': mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize(); break
+      case 'close': mainWindow.close(); break
+      case 'quit': app.quit(); break
+      case 'toggleFullscreen': mainWindow.setFullScreen(!mainWindow.isFullScreen()); break
+      case 'reload': webContents.reload(); break
+      case 'zoomIn': webContents.setZoomLevel(Math.min(5, webContents.getZoomLevel() + 0.5)); break
+      case 'zoomOut': webContents.setZoomLevel(Math.max(-5, webContents.getZoomLevel() - 0.5)); break
+      case 'resetZoom': webContents.setZoomLevel(0); break
+      case 'undo': webContents.undo(); break
+      case 'redo': webContents.redo(); break
+      case 'cut': webContents.cut(); break
+      case 'copy': webContents.copy(); break
+      case 'paste': webContents.paste(); break
+      case 'selectAll': webContents.selectAll(); break
+      default: return false
+    }
+    return true
+  })
+  ipcMain.handle('window:show-about', async (event) => {
+    assertTrustedIpc(event)
+    await dialog.showMessageBox(mainWindow!, {
+      type: 'info',
+      title: 'About Exedeck',
+      message: 'Exedeck',
+      detail: `Version ${app.getVersion()}\nA local development cockpit for tasks, agents, and Git.`,
+      buttons: ['OK'],
+    })
   })
 }
 
@@ -363,7 +601,7 @@ async function runSmokeFlow(win: BrowserWindow): Promise<void> {
   let bridgeReady = false
   try {
     bridgeReady = await win.webContents.executeJavaScript(
-      'Boolean(window.exedeck && typeof window.exedeck.onTaskData === "function")',
+    'Boolean(window.exedeck && window.exedeck.processes && typeof window.exedeck.processes.onData === "function")',
       true,
     )
   } catch {
@@ -411,6 +649,7 @@ function createMainWindow(): BrowserWindow {
     minHeight: 560,
     backgroundColor: '#111318',
     show: false,
+    frame: false,
     ...(icon ? { icon } : {}),
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.cjs'),
@@ -445,6 +684,10 @@ function createMainWindow(): BrowserWindow {
       mainWindow = null
     }
   })
+  win.on('maximize', () => sendWindowState(win))
+  win.on('unmaximize', () => sendWindowState(win))
+  win.on('enter-full-screen', () => sendWindowState(win))
+  win.on('leave-full-screen', () => sendWindowState(win))
 
   const loadPromise = isDev && process.env.VITE_DEV_SERVER_URL
     ? win.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -462,47 +705,6 @@ function createMainWindow(): BrowserWindow {
   }
 
   return win
-}
-
-function installApplicationMenu(): void {
-  const template: MenuItemConstructorOptions[] = [
-    ...(process.platform === 'darwin'
-      ? [{ label: app.name, submenu: [{ role: 'about' as const }, { type: 'separator' as const }, { role: 'quit' as const }] }]
-      : []),
-    {
-      label: 'File',
-      submenu: [{ role: process.platform === 'darwin' ? 'close' : 'quit' }],
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'selectAll' },
-      ],
-    },
-    {
-      label: 'View',
-      submenu: [
-        ...(isDev ? [{ role: 'reload' as const }, { role: 'toggleDevTools' as const }, { type: 'separator' as const }] : []),
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-      ],
-    },
-    {
-      label: 'Window',
-      submenu: [{ role: 'minimize' }, ...(process.platform === 'darwin' ? [{ role: 'front' as const }] : [])],
-    },
-  ]
-
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
@@ -524,12 +726,11 @@ if (!hasSingleInstanceLock) {
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     app.setAppUserModelId('com.exedeck.app')
+    Menu.setApplicationMenu(null)
     appConfig = await loadOrCreateConfig(app.getPath('userData'), repoRoot)
 
     registerIpcHandlers()
     startStatsPolling()
-    installApplicationMenu()
-
     if (!isSmoke && !isAccessibilityTest) {
       startConfiguredAutoTasks()
     }
@@ -568,12 +769,13 @@ app.on('before-quit', (event) => {
 
   const forceQuitTimer = setTimeout(() => {
     taskManager.killAllImmediately()
+    agentManager.killAllImmediately()
     provisioningJobManager.killAllImmediately()
     cleanupComplete = true
     app.exit(0)
   }, 4000)
 
-  void Promise.all([taskManager.stopAll(), provisioningJobManager.stopAll()]).finally(() => {
+  void Promise.all([taskManager.stopAll(), agentManager.stopAll(), provisioningJobManager.stopAll()]).finally(() => {
     clearTimeout(forceQuitTimer)
     cleanupComplete = true
     app.quit()

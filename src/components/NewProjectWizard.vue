@@ -62,7 +62,7 @@ function attachListeners(): void {
   }
 
   unsubscribers.push(
-    window.exedeck.onProjectCreateData((event: ProjectCreateDataEvent) => {
+    window.exedeck.projects.onCreateData((event: ProjectCreateDataEvent) => {
       if (event.jobId !== jobId.value) {
         return
       }
@@ -73,7 +73,7 @@ function attachListeners(): void {
   )
 
   unsubscribers.push(
-    window.exedeck.onProjectCreateStatus((event: ProjectCreateStatusEvent) => {
+    window.exedeck.projects.onCreateStatus((event: ProjectCreateStatusEvent) => {
       if (event.jobId !== jobId.value) {
         return
       }
@@ -83,7 +83,7 @@ function attachListeners(): void {
   )
 
   unsubscribers.push(
-    window.exedeck.onProjectCreateDone((event: ProjectCreateDoneEvent) => {
+    window.exedeck.projects.onCreateDone((event: ProjectCreateDoneEvent) => {
       if (event.jobId !== jobId.value) {
         return
       }
@@ -114,7 +114,7 @@ onMounted(async () => {
   }
 
   try {
-    const defaultDirectory = await window.exedeck.projectDefaultDirectory()
+    const defaultDirectory = await window.exedeck.projects.defaultDirectory()
     if (defaultDirectory.trim()) {
       projectDirectory.value = defaultDirectory
     }
@@ -155,7 +155,7 @@ const statusLabel = computed<string>(() => {
 })
 
 async function pickDirectory(): Promise<void> {
-  const selectedPath = await window.exedeck.pickDirectory(projectDirectory.value || '.')
+  const selectedPath = await window.exedeck.projects.pickDirectory(projectDirectory.value || '.')
   if (selectedPath) {
     projectDirectory.value = selectedPath
   }
@@ -173,7 +173,7 @@ async function startCreate(): Promise<void> {
 
   let nextJobId: string | null = null
   try {
-    nextJobId = await window.exedeck.projectCreate({
+    nextJobId = await window.exedeck.projects.create({
       framework: framework.value,
       name: projectName.value.trim(),
       directory: projectDirectory.value.trim(),
@@ -198,7 +198,7 @@ async function startCreate(): Promise<void> {
   }
 
   jobId.value = nextJobId
-  const snapshot = await window.exedeck.projectCreateGet(nextJobId)
+  const snapshot = await window.exedeck.projects.createGet(nextJobId)
   if (snapshot) {
     status.value = snapshot
   }
@@ -209,7 +209,7 @@ async function cancelCreate(): Promise<void> {
     return
   }
 
-  await window.exedeck.projectCreateCancel(jobId.value)
+  await window.exedeck.projects.createCancel(jobId.value)
 }
 
 async function sendInput(): Promise<void> {
@@ -217,7 +217,7 @@ async function sendInput(): Promise<void> {
     return
   }
 
-  await window.exedeck.projectCreateInput(jobId.value, `${inputLine.value}\n`)
+  await window.exedeck.projects.createInput(jobId.value, `${inputLine.value}\n`)
   inputLine.value = ''
 }
 </script>

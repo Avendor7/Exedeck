@@ -1,84 +1,95 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  AppConfig,
-  ExedeckApi,
-  ProjectCreateDataEvent,
-  ProjectCreateDoneEvent,
-  ProjectCreateRequest,
-  ProjectCreateStatus,
-  ProjectCreateStatusEvent,
-  TaskDataEvent,
-  TaskExitEvent,
-  TaskStatsEvent,
-  TaskStatusEvent,
-  TaskRuntimeSnapshot,
+  AgentDataEvent, AgentExitEvent, AgentRuntimeSnapshot, AgentStatusEvent, AgentToolStatus,
+  AiCommitMessage, AppConfig, Checkout, ExedeckApi, GitBranch, GitBranchCreateRequest,
+  GitCloneRequest, GitCommit, GitOperationResult, GitStatus, GitWorktreeCreateRequest,
+  ProjectConfig, ProjectCreateDataEvent, ProjectCreateDoneEvent, ProjectCreateRequest,
+  ProjectCreateStatus, ProjectCreateStatusEvent, TaskDataEvent, TaskExitEvent,
+  TaskRuntimeSnapshot, TaskStatsEvent, TaskStatusEvent, WindowState,
 } from '../shared/types'
 
+function subscribe<T>(channel: string, listener: (event: T) => void): () => void {
+  const handler = (_event: Electron.IpcRendererEvent, payload: T): void => listener(payload)
+  ipcRenderer.on(channel, handler)
+  return () => ipcRenderer.removeListener(channel, handler)
+}
+
 const api: ExedeckApi = {
-  configGet: () => ipcRenderer.invoke('config:get') as Promise<AppConfig>,
-  configSet: (config) => ipcRenderer.invoke('config:set', config) as Promise<AppConfig>,
-  pickDirectory: (initialPath) => ipcRenderer.invoke('dialog:pick-directory', initialPath) as Promise<string | null>,
-  projectDefaultDirectory: () => ipcRenderer.invoke('project:default-directory') as Promise<string>,
-  projectCreate: (request) => ipcRenderer.invoke('project:create', request as ProjectCreateRequest) as Promise<string | null>,
-  projectCreateInput: (jobId, data) => ipcRenderer.invoke('project:create:input', jobId, data) as Promise<boolean>,
-  projectCreateCancel: (jobId) => ipcRenderer.invoke('project:create:cancel', jobId) as Promise<boolean>,
-  projectCreateGet: (jobId) => ipcRenderer.invoke('project:create:get', jobId) as Promise<ProjectCreateStatus | null>,
-  taskStart: (taskId) => ipcRenderer.invoke('task:start', taskId) as Promise<boolean>,
-  taskStop: (taskId) => ipcRenderer.invoke('task:stop', taskId) as Promise<boolean>,
-  taskRestart: (taskId) => ipcRenderer.invoke('task:restart', taskId) as Promise<boolean>,
-  taskInput: (taskId, data) => ipcRenderer.invoke('task:input', taskId, data) as Promise<boolean>,
-  taskResize: (taskId, cols, rows) => ipcRenderer.invoke('task:resize', taskId, cols, rows) as Promise<boolean>,
-  taskGetStatus: (taskId) => ipcRenderer.invoke('task:get-status', taskId) as Promise<TaskRuntimeSnapshot>,
-  taskGetBuffer: (taskId) => ipcRenderer.invoke('task:get-buffer', taskId) as Promise<string>,
-  taskClearBuffer: (taskId) => ipcRenderer.invoke('task:clear-buffer', taskId) as Promise<boolean>,
-  onProjectCreateData: (listener) => {
-    const handler = (_event: Electron.IpcRendererEvent, payload: ProjectCreateDataEvent): void => {
-      listener(payload)
-    }
-    ipcRenderer.on('project:create:data', handler)
-    return () => ipcRenderer.removeListener('project:create:data', handler)
+  projects: {
+    getConfig: () => ipcRenderer.invoke('config:get') as Promise<AppConfig>,
+    setConfig: (config) => ipcRenderer.invoke('config:set', config) as Promise<AppConfig>,
+    pickDirectory: (initialPath) => ipcRenderer.invoke('dialog:pick-directory', initialPath) as Promise<string | null>,
+    defaultDirectory: () => ipcRenderer.invoke('project:default-directory') as Promise<string>,
+    create: (request) => ipcRenderer.invoke('project:create', request as ProjectCreateRequest) as Promise<string | null>,
+    createInput: (jobId, data) => ipcRenderer.invoke('project:create:input', jobId, data) as Promise<boolean>,
+    createCancel: (jobId) => ipcRenderer.invoke('project:create:cancel', jobId) as Promise<boolean>,
+    createGet: (jobId) => ipcRenderer.invoke('project:create:get', jobId) as Promise<ProjectCreateStatus | null>,
+    openExternal: (projectId, target) => ipcRenderer.invoke('project:open-external', projectId, target) as Promise<boolean>,
+    onCreateData: (listener) => subscribe<ProjectCreateDataEvent>('project:create:data', listener),
+    onCreateStatus: (listener) => subscribe<ProjectCreateStatusEvent>('project:create:status', listener),
+    onCreateDone: (listener) => subscribe<ProjectCreateDoneEvent>('project:create:done', listener),
   },
-  onProjectCreateStatus: (listener) => {
-    const handler = (_event: Electron.IpcRendererEvent, payload: ProjectCreateStatusEvent): void => {
-      listener(payload)
-    }
-    ipcRenderer.on('project:create:status', handler)
-    return () => ipcRenderer.removeListener('project:create:status', handler)
+  processes: {
+    start: (id) => ipcRenderer.invoke('task:start', id) as Promise<boolean>,
+    stop: (id) => ipcRenderer.invoke('task:stop', id) as Promise<boolean>,
+    restart: (id) => ipcRenderer.invoke('task:restart', id) as Promise<boolean>,
+    input: (id, data) => ipcRenderer.invoke('task:input', id, data) as Promise<boolean>,
+    resize: (id, cols, rows) => ipcRenderer.invoke('task:resize', id, cols, rows) as Promise<boolean>,
+    getStatus: (id) => ipcRenderer.invoke('task:get-status', id) as Promise<TaskRuntimeSnapshot>,
+    getBuffer: (id) => ipcRenderer.invoke('task:get-buffer', id) as Promise<string>,
+    clearBuffer: (id) => ipcRenderer.invoke('task:clear-buffer', id) as Promise<boolean>,
+    onData: (listener) => subscribe<TaskDataEvent>('task:data', listener),
+    onStatus: (listener) => subscribe<TaskStatusEvent>('task:status', listener),
+    onStats: (listener) => subscribe<TaskStatsEvent>('task:stats', listener),
+    onExit: (listener) => subscribe<TaskExitEvent>('task:exit', listener),
   },
-  onProjectCreateDone: (listener) => {
-    const handler = (_event: Electron.IpcRendererEvent, payload: ProjectCreateDoneEvent): void => {
-      listener(payload)
-    }
-    ipcRenderer.on('project:create:done', handler)
-    return () => ipcRenderer.removeListener('project:create:done', handler)
+  agents: {
+    discoverTools: () => ipcRenderer.invoke('agent:discover-tools') as Promise<AgentToolStatus[]>,
+    start: (request) => ipcRenderer.invoke('agent:start', request) as Promise<boolean>,
+    stop: (id) => ipcRenderer.invoke('agent:stop', id) as Promise<boolean>,
+    restart: (id) => ipcRenderer.invoke('agent:restart', id) as Promise<boolean>,
+    input: (id, data) => ipcRenderer.invoke('agent:input', id, data) as Promise<boolean>,
+    resize: (id, cols, rows) => ipcRenderer.invoke('agent:resize', id, cols, rows) as Promise<boolean>,
+    getStatus: (id) => ipcRenderer.invoke('agent:get-status', id) as Promise<AgentRuntimeSnapshot>,
+    getBuffer: (id) => ipcRenderer.invoke('agent:get-buffer', id) as Promise<string>,
+    clearBuffer: (id) => ipcRenderer.invoke('agent:clear-buffer', id) as Promise<boolean>,
+    markRead: (id) => ipcRenderer.invoke('agent:mark-read', id) as Promise<boolean>,
+    onData: (listener) => subscribe<AgentDataEvent>('agent:data', listener),
+    onStatus: (listener) => subscribe<AgentStatusEvent>('agent:status', listener),
+    onExit: (listener) => subscribe<AgentExitEvent>('agent:exit', listener),
   },
-  onTaskData: (listener) => {
-    const handler = (_event: Electron.IpcRendererEvent, payload: TaskDataEvent): void => {
-      listener(payload)
-    }
-    ipcRenderer.on('task:data', handler)
-    return () => ipcRenderer.removeListener('task:data', handler)
+  git: {
+    listCheckouts: (id) => ipcRenderer.invoke('git:list-checkouts', id) as Promise<Checkout[]>,
+    status: (id) => ipcRenderer.invoke('git:status', id) as Promise<GitStatus>,
+    history: (id, limit) => ipcRenderer.invoke('git:history', id, limit) as Promise<GitCommit[]>,
+    branches: (id) => ipcRenderer.invoke('git:branches', id) as Promise<GitBranch[]>,
+    stage: (id, paths) => ipcRenderer.invoke('git:stage', id, paths) as Promise<GitOperationResult>,
+    unstage: (id, paths) => ipcRenderer.invoke('git:unstage', id, paths) as Promise<GitOperationResult>,
+    discard: (id, paths) => ipcRenderer.invoke('git:discard', id, paths) as Promise<GitOperationResult>,
+    stash: (id, message) => ipcRenderer.invoke('git:stash', id, message) as Promise<GitOperationResult>,
+    stashPop: (id) => ipcRenderer.invoke('git:stash-pop', id) as Promise<GitOperationResult>,
+    commit: (id, summary, description) => ipcRenderer.invoke('git:commit', id, summary, description) as Promise<GitOperationResult>,
+    createBranch: (request) => ipcRenderer.invoke('git:create-branch', request as GitBranchCreateRequest) as Promise<GitOperationResult>,
+    switchBranch: (id, branch) => ipcRenderer.invoke('git:switch-branch', id, branch) as Promise<GitOperationResult>,
+    deleteBranch: (id, branch) => ipcRenderer.invoke('git:delete-branch', id, branch) as Promise<GitOperationResult>,
+    renameBranch: (id, oldName, newName) => ipcRenderer.invoke('git:rename-branch', id, oldName, newName) as Promise<GitOperationResult>,
+    mergeBranch: (id, branch) => ipcRenderer.invoke('git:merge-branch', id, branch) as Promise<GitOperationResult>,
+    fetch: (id) => ipcRenderer.invoke('git:fetch', id) as Promise<GitOperationResult>,
+    pull: (id) => ipcRenderer.invoke('git:pull', id) as Promise<GitOperationResult>,
+    push: (id) => ipcRenderer.invoke('git:push', id) as Promise<GitOperationResult>,
+    createWorktree: (request) => ipcRenderer.invoke('git:create-worktree', request as GitWorktreeCreateRequest) as Promise<GitOperationResult>,
+    removeWorktree: (id) => ipcRenderer.invoke('git:remove-worktree', id) as Promise<GitOperationResult>,
+    clone: (request) => ipcRenderer.invoke('git:clone', request as GitCloneRequest) as Promise<ProjectConfig | null>,
+    openExternal: (id, target) => ipcRenderer.invoke('git:open-external', id, target) as Promise<boolean>,
   },
-  onTaskStatus: (listener) => {
-    const handler = (_event: Electron.IpcRendererEvent, payload: TaskStatusEvent): void => {
-      listener(payload)
-    }
-    ipcRenderer.on('task:status', handler)
-    return () => ipcRenderer.removeListener('task:status', handler)
+  ai: {
+    generateCommitMessage: (id) => ipcRenderer.invoke('ai:generate-commit-message', id) as Promise<AiCommitMessage>,
   },
-  onTaskStats: (listener) => {
-    const handler = (_event: Electron.IpcRendererEvent, payload: TaskStatsEvent): void => {
-      listener(payload)
-    }
-    ipcRenderer.on('task:stats', handler)
-    return () => ipcRenderer.removeListener('task:stats', handler)
-  },
-  onTaskExit: (listener) => {
-    const handler = (_event: Electron.IpcRendererEvent, payload: TaskExitEvent): void => {
-      listener(payload)
-    }
-    ipcRenderer.on('task:exit', handler)
-    return () => ipcRenderer.removeListener('task:exit', handler)
+  window: {
+    command: (command) => ipcRenderer.invoke('window:command', command) as Promise<boolean>,
+    getState: () => ipcRenderer.invoke('window:get-state') as Promise<WindowState>,
+    showAbout: () => ipcRenderer.invoke('window:show-about') as Promise<void>,
+    onState: (listener) => subscribe<WindowState>('window:state', listener),
   },
 }
 

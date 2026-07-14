@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue'
-import type { AppConfig, ProjectConfig, TaskConfig, TaskStatsEvent } from '../../shared/types'
+import type { AgentRuntimeSnapshot, AppConfig, ProjectConfig, TaskConfig, TaskStatsEvent } from '../../shared/types'
 
 const config = ref<AppConfig | null>(null)
 const selectedProjectId = ref<string>('')
@@ -11,6 +11,7 @@ const lastError = ref('')
 const taskBuffers = ref<Record<string, string>>({})
 const taskRunning = ref<Record<string, boolean>>({})
 const taskStats = ref<Record<string, TaskStatsEvent>>({})
+const agentRuntime = ref<Record<string, AgentRuntimeSnapshot>>({})
 
 let listenersAttached = false
 
@@ -27,20 +28,31 @@ function attachTaskListeners(): void {
 
   listenersAttached = true
 
-  window.exedeck.onTaskData(({ taskId, chunk }) => {
+  window.exedeck.processes.onData(({ taskId, chunk }) => {
     pushBuffer(taskId, chunk)
   })
 
-  window.exedeck.onTaskStatus(({ taskId, running }) => {
+  window.exedeck.processes.onStatus(({ taskId, running }) => {
     taskRunning.value[taskId] = running
   })
 
-  window.exedeck.onTaskStats((stats) => {
+  window.exedeck.processes.onStats((stats) => {
     taskStats.value[stats.taskId] = stats
   })
 
-  window.exedeck.onTaskExit(({ taskId }) => {
+  window.exedeck.processes.onExit(({ taskId }) => {
     taskRunning.value[taskId] = false
+  })
+
+  window.exedeck.agents.onStatus(({ sessionId, state, unread }) => {
+    agentRuntime.value[sessionId] = { state, unread }
+  })
+
+  window.exedeck.agents.onExit(({ sessionId, exitCode }) => {
+    agentRuntime.value[sessionId] = {
+      state: exitCode === 0 ? 'stopped' : 'crashed',
+      unread: agentRuntime.value[sessionId]?.unread ?? true,
+    }
   })
 }
 
@@ -53,6 +65,7 @@ function pruneTaskState(nextConfig: AppConfig | null): void {
   }
 
   const activeTaskIds = new Set(nextConfig.projects.flatMap((project) => project.tasks.map((task) => task.id)))
+  const activeAgentIds = new Set(nextConfig.agentSessions.map((session) => session.id))
 
   taskBuffers.value = Object.fromEntries(
     Object.entries(taskBuffers.value).filter(([taskId]) => activeTaskIds.has(taskId)),
@@ -62,6 +75,9 @@ function pruneTaskState(nextConfig: AppConfig | null): void {
   )
   taskStats.value = Object.fromEntries(
     Object.entries(taskStats.value).filter(([taskId]) => activeTaskIds.has(taskId)),
+  )
+  agentRuntime.value = Object.fromEntries(
+    Object.entries(agentRuntime.value).filter(([sessionId]) => activeAgentIds.has(sessionId)),
   )
 }
 
@@ -100,13 +116,19 @@ async function hydrateTaskBuffers(tasks: TaskConfig[]): Promise<void> {
   await Promise.all(
     tasks.map(async (task) => {
       const [buffer, status] = await Promise.all([
-        window.exedeck.taskGetBuffer(task.id),
-        window.exedeck.taskGetStatus(task.id),
+        window.exedeck.processes.getBuffer(task.id),
+        window.exedeck.processes.getStatus(task.id),
       ])
       taskBuffers.value[task.id] = buffer
       taskRunning.value[task.id] = status.running
     }),
   )
+}
+
+async function hydrateAgentStatuses(sessionIds: string[]): Promise<void> {
+  await Promise.all(sessionIds.map(async (sessionId) => {
+    agentRuntime.value[sessionId] = await window.exedeck.agents.getStatus(sessionId)
+  }))
 }
 
 function withOnboardingState(nextConfig: AppConfig): AppConfig {
@@ -186,14 +208,18 @@ export function useStore() {
     }
   }
 
+  const getAgentRuntime = (sessionId: string): AgentRuntimeSnapshot =>
+    agentRuntime.value[sessionId] ?? { state: 'stopped', unread: false }
+
   const loadConfig = async (): Promise<void> => {
     try {
       lastError.value = ''
       attachTaskListeners()
-      const nextConfig = await window.exedeck.configGet()
+      const nextConfig = await window.exedeck.projects.getConfig()
       config.value = nextConfig
       ensureSelections(config.value)
       await hydrateTaskBuffers(nextConfig.projects.flatMap((item) => item.tasks))
+      await hydrateAgentStatuses(nextConfig.agentSessions.map((session) => session.id))
     } catch (error) {
       lastError.value = error instanceof Error ? error.message : 'Could not load the application configuration.'
       throw error
@@ -204,10 +230,11 @@ export function useStore() {
     try {
       lastError.value = ''
       const prepared = withOnboardingState(nextConfig)
-      const savedConfig = await window.exedeck.configSet(prepared)
+      const savedConfig = await window.exedeck.projects.setConfig(prepared)
       config.value = savedConfig
       ensureSelections(config.value)
       await hydrateTaskBuffers(savedConfig.projects.flatMap((item) => item.tasks))
+      await hydrateAgentStatuses(savedConfig.agentSessions.map((session) => session.id))
     } catch (error) {
       lastError.value = error instanceof Error ? error.message : 'Could not save the application configuration.'
       throw error
@@ -232,35 +259,35 @@ export function useStore() {
 
   const startTask = async (taskId: string): Promise<void> => {
     lastError.value = ''
-    if (!(await window.exedeck.taskStart(taskId))) {
+    if (!(await window.exedeck.processes.start(taskId))) {
       lastError.value = 'The task could not be started. Check its command and working directory.'
     }
   }
 
   const stopTask = async (taskId: string): Promise<void> => {
     lastError.value = ''
-    if (!(await window.exedeck.taskStop(taskId))) {
+    if (!(await window.exedeck.processes.stop(taskId))) {
       lastError.value = 'The task did not stop cleanly.'
     }
   }
 
   const restartTask = async (taskId: string): Promise<void> => {
     lastError.value = ''
-    if (!(await window.exedeck.taskRestart(taskId))) {
+    if (!(await window.exedeck.processes.restart(taskId))) {
       lastError.value = 'The task could not be restarted.'
     }
   }
 
   const inputTask = async (taskId: string, data: string): Promise<void> => {
-    await window.exedeck.taskInput(taskId, data)
+    await window.exedeck.processes.input(taskId, data)
   }
 
   const resizeTask = async (taskId: string, cols: number, rows: number): Promise<void> => {
-    await window.exedeck.taskResize(taskId, cols, rows)
+    await window.exedeck.processes.resize(taskId, cols, rows)
   }
 
   const clearTaskBuffer = async (taskId: string): Promise<void> => {
-    if (await window.exedeck.taskClearBuffer(taskId)) {
+    if (await window.exedeck.processes.clearBuffer(taskId)) {
       taskBuffers.value[taskId] = ''
     }
   }
@@ -290,6 +317,7 @@ export function useStore() {
     setProjectCollapsed,
     getTaskRunning,
     getTaskStats,
+    getAgentRuntime,
     startTask,
     stopTask,
     restartTask,
