@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import type { AppConfig, ProjectConfig, TaskConfig } from '../../shared/types'
 import { createId, formatArgs, parseArgs } from '../utils/commandArgs'
+import { useDialogFocus } from '../composables/useDialogFocus'
 
 interface DraftTask {
   id: string
@@ -69,6 +70,10 @@ function toDraftConfig(config: AppConfig): DraftConfig {
 const draft = ref<DraftConfig>(toDraftConfig(props.config))
 const editingProjectId = ref<string>(props.selectedProjectId || draft.value.projects[0]?.id || '')
 const pendingProjectRemovalId = ref<string | null>(null)
+const dialogRef = ref<HTMLElement | null>(null)
+const confirmCancelRef = ref<HTMLButtonElement | null>(null)
+
+useDialogFocus(dialogRef, () => emit('close'))
 
 const currentProject = computed<DraftProject | null>(
   () => draft.value.projects.find((project) => project.id === editingProjectId.value) ?? draft.value.projects[0] ?? null,
@@ -116,6 +121,7 @@ function removeProject(projectId: string): void {
 
 function requestProjectRemoval(projectId: string): void {
   pendingProjectRemovalId.value = projectId
+  void nextTick(() => confirmCancelRef.value?.focus())
 }
 
 function cancelProjectRemoval(): void {
@@ -193,10 +199,20 @@ function saveDraft(): void {
 </script>
 
 <template>
-  <div class="modal-overlay" role="dialog" aria-modal="true">
-    <section class="settings-modal">
-      <header class="modal-header">
-        <h2>Settings & Configuration</h2>
+  <div class="modal-overlay">
+    <section
+      ref="dialogRef"
+      class="settings-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+      tabindex="-1"
+    >
+      <header class="modal-header" :inert="Boolean(pendingProjectRemoval)">
+        <div>
+          <span class="modal-eyebrow">Workspace</span>
+          <h2 id="settings-title">Project settings</h2>
+        </div>
         <div class="modal-actions">
           <button type="button" class="primary" @click="emit('createProject')">Create Project</button>
           <button
@@ -212,7 +228,7 @@ function saveDraft(): void {
         </div>
       </header>
 
-      <div class="modal-body">
+      <div class="modal-body" :inert="Boolean(pendingProjectRemoval)">
         <aside class="settings-sidebar">
           <div class="settings-sidebar-head">
             <h3>Projects</h3>
@@ -301,15 +317,19 @@ function saveDraft(): void {
         </section>
       </div>
 
-      <div v-if="pendingProjectRemoval" class="confirm-overlay" role="dialog" aria-modal="true">
-        <div class="confirm-dialog">
-          <h3>Delete project?</h3>
+      <div
+        v-if="pendingProjectRemoval"
+        class="confirm-overlay"
+        @keydown.esc.stop.prevent="cancelProjectRemoval"
+      >
+        <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-project-title">
+          <h2 id="delete-project-title">Delete project?</h2>
           <p>
             This will remove <strong>{{ pendingProjectRemoval.name || 'Untitled project' }}</strong> and all of its tasks from
             this configuration.
           </p>
           <div class="confirm-actions">
-            <button type="button" class="secondary" @click="cancelProjectRemoval">Cancel</button>
+            <button ref="confirmCancelRef" type="button" class="secondary" @click="cancelProjectRemoval">Cancel</button>
             <button type="button" class="danger" @click="confirmProjectRemoval">Delete Project</button>
           </div>
         </div>

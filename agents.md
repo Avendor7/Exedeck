@@ -12,7 +12,7 @@ Instructions for AI coding agents working on Exedeck (Electron + Vue + Vite).
 - **Electron** (v40) bootstrapped via `electron-vite` with `electron-builder` packaging.
 - **Renderer:** Vue 3 + TypeScript using `<script setup>`, `xterm`/`xterm-addon-fit`, and `pidusage` for stats.
 - **Preload bridge:** `electron/preload.ts` exposes a typed `window.exedeck` API defined in `shared/types.ts`.
-- **CLI:** `npm` with `typecheck`, `build`, `smoke`, `start`, `pack`, `dist`, `dist:win`, `dist:linux` scripts.
+- **CLI:** `npm` with `check`, `test`, `test:a11y`, `typecheck`, `build`, `smoke`, `start`, and packaging scripts.
 
 ## Repository layout (single source of truth)
 - `electron/main.ts` — app lifecycle, IPC handlers, auto-start logic, smoke test handshake.
@@ -33,6 +33,7 @@ Instructions for AI coding agents working on Exedeck (Electron + Vue + Vite).
 - Renderer ↔ Main uses `ipcMain.handle` + `ipcRenderer.invoke`, never `ipcRenderer.send`/`on` directly from components.
 - Preload exposes only the typed `window.exedeck` API (no blanket `ipcRenderer`).
 - `contextIsolation: true`, `nodeIntegration: false`, never expose `process` / Node globals to renderer.
+- Keep the Chromium renderer sandbox enabled, reject non-main-frame IPC, and deny navigation, popups, and permissions by default.
 - Validate and normalize every config payload in `electron/config.ts`; treat renderer data as untrusted.
 - Task events (`task:data`, `task:status`, `task:stats`, `task:exit`) always flow from main to renderer via the bridge; maintain max buffer (≈250k chars).
 
@@ -53,6 +54,8 @@ Instructions for AI coding agents working on Exedeck (Electron + Vue + Vite).
 ## Scripts & tooling
 - `npm run typecheck` runs `tsc --noEmit`.
 - `npm run build` cross-builds main/preload/renderer via `electron-vite build`.
+- `npm test` runs Vitest unit tests; `npm run check` runs typecheck, tests, and build.
+- `npm run test:a11y` launches an isolated built app and runs axe against key views (requires a graphical session).
 - `npm run pack`/`npm run dist`/`npm run dist:win`/`npm run dist:linux` wrap `electron-builder` for packaging.
 - `npm run smoke` launches the built app with `SMOKE=1` to assert the bridge/buffer flow; it self-terminates (`SMOKE_OK`/`SMOKE_FAIL`).
 - `npm run start` / `npm run start:linux` run the app (Linux mode adds `--no-sandbox`).
@@ -66,4 +69,3 @@ Instructions for AI coding agents working on Exedeck (Electron + Vue + Vite).
 - Confirm whether a config change should trigger onboarding completion, especially if modifying `onboardingCompleted` handling.
 - Ask if a new IPC channel belongs in the existing `window.exedeck` API or if a new domain-specific bridge is acceptable.
 - Ask if a native dialog or privileged action should be in main/preload instead of renderer.
-

@@ -53,6 +53,18 @@ function validateProjectName(name: string): string | null {
     return 'Project name cannot be dot-path values.'
   }
 
+  if (trimmed.length > 100) {
+    return 'Project name must be 100 characters or fewer.'
+  }
+
+  if (/[\u0000-\u001f<>:"|?*]/.test(trimmed)) {
+    return 'Project name contains characters that are not valid in file names.'
+  }
+
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(trimmed)) {
+    return 'Project name is reserved by Windows.'
+  }
+
   return null
 }
 
@@ -96,11 +108,23 @@ export class ProvisioningJobManager {
     }
 
     this.jobs.set(jobId, job)
+    this.pruneFinishedJobs()
     this.emitStatus(job)
 
     const validationError = validateProjectName(name)
     if (validationError) {
       this.finish(job, 'failed', validationError)
+      return jobId
+    }
+
+    const duplicateJob = Array.from(this.jobs.values()).find(
+      (candidate) =>
+        candidate.id !== job.id &&
+        candidate.status.targetPath === targetPath &&
+        (candidate.status.state === 'queued' || candidate.status.state === 'running'),
+    )
+    if (duplicateJob) {
+      this.finish(job, 'failed', 'Another scaffold job is already using this target directory.')
       return jobId
     }
 
@@ -110,8 +134,9 @@ export class ProvisioningJobManager {
       if (!dirStat.isDirectory()) {
         throw new Error('Selected directory is not a folder.')
       }
-    } catch {
-      this.finish(job, 'failed', `Directory does not exist: ${directory}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.finish(job, 'failed', `Cannot use the selected directory: ${message}`)
       return jobId
     }
 
@@ -121,11 +146,19 @@ export class ProvisioningJobManager {
         this.finish(job, 'failed', `Target already exists and is not empty: ${targetPath}`)
         return jobId
       }
-    } catch {
-      // Target does not exist yet; this is valid.
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
+      if (code !== 'ENOENT') {
+        const message = error instanceof Error ? error.message : String(error)
+        this.finish(job, 'failed', `Cannot inspect the target directory: ${message}`)
+        return jobId
+      }
     }
 
-    void this.runProvisioning(job)
+    void this.runProvisioning(job).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      this.finish(job, 'failed', `Unexpected scaffold error: ${message}`)
+    })
     return jobId
   }
 
@@ -147,8 +180,12 @@ export class ProvisioningJobManager {
       return false
     }
 
-    job.process.write(data)
-    return true
+    try {
+      job.process.write(data)
+      return true
+    } catch {
+      return false
+    }
   }
 
   async cancel(jobId: string): Promise<boolean> {
@@ -162,13 +199,20 @@ export class ProvisioningJobManager {
     }
 
     job.cancelRequested = true
-    job.process.write('\u0003')
+    try {
+      job.process.write('\u0003')
+    } catch {
+      // The process may have exited before the cancellation write.
+    }
     const stoppedByCtrlC = await this.waitForState(jobId, ['canceled', 'failed', 'success'], 1500)
     if (stoppedByCtrlC) {
       return true
     }
 
-    const pid = job.process.pid
+    const pid = job.process?.pid
+    if (!pid) {
+      return true
+    }
     await this.killTree(pid)
     await this.waitForState(jobId, ['canceled', 'failed', 'success'], 1200)
     return true
@@ -177,10 +221,21 @@ export class ProvisioningJobManager {
   private async runProvisioning(job: ProvisioningJob): Promise<void> {
     const attempts = this.buildAttempts(job)
     this.updateState(job, 'running')
+    let previousError = ''
 
     for (let index = 0; index < attempts.length; index += 1) {
       const attempt = attempts[index]
       if (index > 0) {
+        const targetIsEmpty = await this.isDirectoryEmpty(job.status.targetPath)
+        if (!targetIsEmpty) {
+          this.finish(
+            job,
+            'failed',
+            `${previousError} The primary command left files in the target directory, so Exedeck did not run a fallback that could overwrite them.`.trim(),
+          )
+          return
+        }
+
         job.status.fallbackUsed = true
         this.appendChunk(job, `\r\n[exedeck] Primary scaffold failed. Trying fallback command...\r\n`)
       }
@@ -216,6 +271,7 @@ export class ProvisioningJobManager {
         this.finish(job, 'failed', message)
         return
       }
+      previousError = result.error ?? 'The primary scaffold command failed.'
     }
   }
 
@@ -348,29 +404,34 @@ export class ProvisioningJobManager {
   private async runPostCreateSteps(
     job: ProvisioningJob,
   ): Promise<{ state: 'success' | 'failed' | 'canceled'; error?: string }> {
-    await this.enforceSqliteDefaults(job.status.targetPath)
+    if (job.status.framework === 'laravel') {
+      await this.enforceSqliteDefaults(job.status.targetPath)
+    }
+
+    const packageManager = await this.detectPackageManager(job.status.targetPath)
+    const installArgs = packageManager === 'yarn' ? [] : ['install']
 
     const installResult = await this.runAttempt(job, {
-      command: 'npm',
-      args: ['install'],
+      command: packageManager,
+      args: installArgs,
       cwd: job.status.targetPath,
     })
     if (installResult.state !== 'success') {
       return {
         state: installResult.state,
-        error: installResult.error ?? 'npm install failed.',
+        error: installResult.error ?? `${packageManager} install failed.`,
       }
     }
 
     const buildResult = await this.runAttempt(job, {
-      command: 'npm',
-      args: ['run', 'build'],
+      command: packageManager,
+      args: packageManager === 'yarn' ? ['build'] : ['run', 'build'],
       cwd: job.status.targetPath,
     })
     if (buildResult.state !== 'success') {
       return {
         state: buildResult.state,
-        error: buildResult.error ?? 'npm run build failed.',
+        error: buildResult.error ?? `${packageManager} build failed.`,
       }
     }
 
@@ -388,8 +449,11 @@ export class ProvisioningJobManager {
         if (next !== existing) {
           await fs.writeFile(fullPath, next, 'utf8')
         }
-      } catch {
-        // Ignore missing env files.
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
+        if (code !== 'ENOENT') {
+          throw error
+        }
       }
     }
   }
@@ -429,7 +493,31 @@ export class ProvisioningJobManager {
       return null
     }
 
+    this.jobs.delete(jobId)
     return job.createdProject
+  }
+
+  async stopAll(): Promise<void> {
+    const activeJobs = Array.from(this.jobs.values()).filter(
+      (job) => job.status.state === 'running' && job.process,
+    )
+    await Promise.all(activeJobs.map((job) => this.cancel(job.id)))
+  }
+
+  killAllImmediately(): void {
+    for (const job of this.jobs.values()) {
+      if (!job.process) {
+        continue
+      }
+
+      job.cancelRequested = true
+      try {
+        job.process.kill()
+      } catch {
+        // The operating system may already have reaped the child process.
+      }
+      job.process = undefined
+    }
   }
 
   private async buildDefaultTasks(
@@ -509,6 +597,29 @@ export class ProvisioningJobManager {
       return 'yarn'
     } catch {
       return 'npm'
+    }
+  }
+
+  private async isDirectoryEmpty(directory: string): Promise<boolean> {
+    try {
+      return (await fs.readdir(directory)).length === 0
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
+      return code === 'ENOENT'
+    }
+  }
+
+  private pruneFinishedJobs(): void {
+    if (this.jobs.size <= 25) {
+      return
+    }
+
+    const finished = Array.from(this.jobs.values())
+      .filter((job) => job.status.endedAt)
+      .sort((a, b) => (a.status.endedAt ?? 0) - (b.status.endedAt ?? 0))
+
+    for (const job of finished.slice(0, Math.max(0, this.jobs.size - 25))) {
+      this.jobs.delete(job.id)
     }
   }
 

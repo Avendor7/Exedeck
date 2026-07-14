@@ -18,6 +18,7 @@ const containerRef = ref<HTMLElement | null>(null)
 let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
 let resizeObserver: ResizeObserver | null = null
+let colorScheme: MediaQueryList | null = null
 let renderedBuffer = ''
 let renderedTaskId = ''
 
@@ -50,11 +51,55 @@ function fitTerminalAndNotify(): void {
     return
   }
 
-  fitAddon.fit()
+  try {
+    fitAddon.fit()
+  } catch {
+    return
+  }
   emit('resize', {
     cols: terminal.cols,
     rows: terminal.rows,
   })
+}
+
+function applyTerminalTheme(): void {
+  if (!terminal) {
+    return
+  }
+
+  terminal.options.theme = colorScheme?.matches
+    ? {
+        background: '#f7f8fa',
+        foreground: '#20232a',
+        cursor: '#155eef',
+        selectionBackground: '#b9d0ff',
+        black: '#25272c',
+        red: '#b4233c',
+        green: '#087443',
+        yellow: '#8a5b00',
+        blue: '#155eef',
+        magenta: '#8c3eb8',
+        cyan: '#087f8c',
+        white: '#e7e9ee',
+        brightBlack: '#686d76',
+        brightWhite: '#ffffff',
+      }
+    : {
+        background: '#0c0e12',
+        foreground: '#e6e8ec',
+        cursor: '#8eafff',
+        selectionBackground: '#315ea8',
+        black: '#111318',
+        red: '#ff7f8f',
+        green: '#68d89b',
+        yellow: '#eac36b',
+        blue: '#8eafff',
+        magenta: '#d89bff',
+        cyan: '#72d5df',
+        white: '#d9dce2',
+        brightBlack: '#6e737e',
+        brightWhite: '#ffffff',
+      }
 }
 
 onMounted(async () => {
@@ -66,30 +111,20 @@ onMounted(async () => {
   terminal = new Terminal({
     convertEol: false,
     cursorBlink: true,
-    fontFamily: 'JetBrains Mono, Fira Code, Menlo, monospace',
+    fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
     fontSize: 13,
-    theme: {
-      background: '#090c12',
-      foreground: '#e3e9f0',
-      cursor: '#91a8ff',
-      black: '#0a0d13',
-      red: '#ff6e8a',
-      green: '#70e1a1',
-      yellow: '#ffcc66',
-      blue: '#7ba2ff',
-      magenta: '#d78cff',
-      cyan: '#7cd5ff',
-      white: '#dbe3ef',
-      brightBlack: '#4a556b',
-      brightRed: '#ff8ea2',
-      brightGreen: '#8ef0b5',
-      brightYellow: '#ffd98a',
-      brightBlue: '#9ab9ff',
-      brightMagenta: '#e1a4ff',
-      brightCyan: '#97e4ff',
-      brightWhite: '#f4f8ff',
-    },
+    lineHeight: 1.22,
+    minimumContrastRatio: 4.5,
+    screenReaderMode: true,
+    scrollback: 10_000,
+    cursorStyle: 'bar',
+    cursorWidth: 2,
+    rightClickSelectsWord: true,
   })
+
+  colorScheme = window.matchMedia('(prefers-color-scheme: light)')
+  colorScheme.addEventListener('change', applyTerminalTheme)
+  applyTerminalTheme()
 
   fitAddon = new FitAddon()
   terminal.loadAddon(fitAddon)
@@ -150,6 +185,8 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
   containerRef.value?.removeEventListener('click', focusTerminal)
+  colorScheme?.removeEventListener('change', applyTerminalTheme)
+  colorScheme = null
 
   terminal?.dispose()
   terminal = null
@@ -159,6 +196,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="terminal-root">
-    <div ref="containerRef" class="terminal-host" />
+    <div ref="containerRef" class="terminal-host" role="region" aria-label="Interactive task terminal" />
   </div>
 </template>

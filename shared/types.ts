@@ -34,6 +34,11 @@ export interface TaskStatusEvent {
   running: boolean
 }
 
+export interface TaskRuntimeSnapshot {
+  running: boolean
+  pid?: number
+}
+
 export interface TaskStatsEvent {
   taskId: string
   cpu: number
@@ -91,7 +96,7 @@ export interface ProjectCreateDoneEvent {
 
 export interface ExedeckApi {
   configGet: () => Promise<AppConfig>
-  configSet: (config: AppConfig) => Promise<boolean>
+  configSet: (config: AppConfig) => Promise<AppConfig>
   pickDirectory: (initialPath?: string) => Promise<string | null>
   projectDefaultDirectory: () => Promise<string>
   projectCreate: (request: ProjectCreateRequest) => Promise<string | null>
@@ -103,6 +108,7 @@ export interface ExedeckApi {
   taskRestart: (taskId: string) => Promise<boolean>
   taskInput: (taskId: string, data: string) => Promise<boolean>
   taskResize: (taskId: string, cols: number, rows: number) => Promise<boolean>
+  taskGetStatus: (taskId: string) => Promise<TaskRuntimeSnapshot>
   taskGetBuffer: (taskId: string) => Promise<string>
   taskClearBuffer: (taskId: string) => Promise<boolean>
   onProjectCreateData: (listener: (event: ProjectCreateDataEvent) => void) => () => void

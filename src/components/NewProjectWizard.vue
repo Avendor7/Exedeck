@@ -7,6 +7,7 @@ import type {
   ProjectCreateStatus,
   ProjectCreateStatusEvent,
 } from '../../shared/types'
+import { useDialogFocus } from '../composables/useDialogFocus'
 
 const emit = defineEmits<{
   close: []
@@ -24,6 +25,17 @@ const status = ref<ProjectCreateStatus | null>(null)
 const logs = ref('')
 const inputLine = ref('')
 const localError = ref('')
+const dialogRef = ref<HTMLElement | null>(null)
+
+function requestClose(): void {
+  if (isRunning.value) {
+    localError.value = 'Cancel the running scaffold before closing this window.'
+    return
+  }
+  emit('close')
+}
+
+useDialogFocus(dialogRef, requestClose)
 
 const unsubscribers: Array<() => void> = []
 function sanitizeTerminalChunk(chunk: string): string {
@@ -54,7 +66,8 @@ function attachListeners(): void {
       if (event.jobId !== jobId.value) {
         return
       }
-      logs.value = `${logs.value}${sanitizeTerminalChunk(event.chunk)}`
+      const nextLogs = `${logs.value}${sanitizeTerminalChunk(event.chunk)}`
+      logs.value = nextLogs.length > 500_000 ? nextLogs.slice(-500_000) : nextLogs
       localError.value = ''
     }),
   )
@@ -100,9 +113,13 @@ onMounted(async () => {
     return
   }
 
-  const defaultDirectory = await window.exedeck.projectDefaultDirectory()
-  if (defaultDirectory.trim()) {
-    projectDirectory.value = defaultDirectory
+  try {
+    const defaultDirectory = await window.exedeck.projectDefaultDirectory()
+    if (defaultDirectory.trim()) {
+      projectDirectory.value = defaultDirectory
+    }
+  } catch {
+    localError.value = 'Could not determine the default projects folder. Choose a folder manually.'
   }
 })
 
@@ -154,20 +171,26 @@ async function startCreate(): Promise<void> {
   status.value = null
   localError.value = ''
 
-  const nextJobId = await window.exedeck.projectCreate({
-    framework: framework.value,
-    name: projectName.value.trim(),
-    directory: projectDirectory.value.trim(),
-    ...(framework.value === 'laravel'
-      ? {
-          laravel: {
-            starterKit: laravelStarterKit.value,
-            authMode: laravelAuthMode.value,
-            boost: laravelBoost.value,
-          },
-        }
-      : {}),
-  })
+  let nextJobId: string | null = null
+  try {
+    nextJobId = await window.exedeck.projectCreate({
+      framework: framework.value,
+      name: projectName.value.trim(),
+      directory: projectDirectory.value.trim(),
+      ...(framework.value === 'laravel'
+        ? {
+            laravel: {
+              starterKit: laravelStarterKit.value,
+              authMode: laravelAuthMode.value,
+              boost: laravelBoost.value,
+            },
+          }
+        : {}),
+    })
+  } catch (error) {
+    localError.value = error instanceof Error ? error.message : 'Failed to start the scaffold job.'
+    return
+  }
 
   if (!nextJobId) {
     localError.value = 'Failed to start project scaffold job.'
@@ -200,13 +223,23 @@ async function sendInput(): Promise<void> {
 </script>
 
 <template>
-  <div class="modal-overlay" role="dialog" aria-modal="true">
-    <section class="new-project-modal">
+  <div class="modal-overlay">
+    <section
+      ref="dialogRef"
+      class="new-project-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="new-project-title"
+      tabindex="-1"
+    >
       <header class="modal-header">
-        <h2>Create New Project</h2>
+        <div>
+          <span class="modal-eyebrow">Scaffolding</span>
+          <h2 id="new-project-title">Create a new project</h2>
+        </div>
         <div class="modal-actions">
-          <span class="pill">{{ statusLabel }}</span>
-          <button type="button" class="secondary" @click="emit('close')">Close</button>
+          <span class="pill" :class="`state-${status?.state ?? 'idle'}`" role="status">{{ statusLabel }}</span>
+          <button type="button" class="secondary" @click="requestClose">Close</button>
         </div>
       </header>
 
@@ -214,15 +247,20 @@ async function sendInput(): Promise<void> {
         <section class="new-project-form">
           <label>
             <span>Framework</span>
-            <select v-model="framework" :disabled="isRunning">
-              <option value="laravel">Laravel</option>
-              <option value="adonisjs">AdonisJS</option>
-            </select>
+            <span class="select-field">
+              <select v-model="framework" :disabled="isRunning">
+                <option value="laravel">Laravel</option>
+                <option value="adonisjs">AdonisJS</option>
+              </select>
+              <span class="select-indicator" aria-hidden="true">
+                <svg viewBox="0 0 20 20"><path d="m4.5 7 5.5 5.5L15.5 7" /></svg>
+              </span>
+            </span>
           </label>
 
           <label>
             <span>Project name</span>
-            <input v-model="projectName" type="text" placeholder="my-app" :disabled="isRunning" />
+            <input v-model="projectName" type="text" placeholder="my-app" autocomplete="off" autofocus :disabled="isRunning" />
           </label>
 
           <label>
@@ -236,22 +274,32 @@ async function sendInput(): Promise<void> {
           <template v-if="isLaravel">
             <label>
               <span>Starter kit</span>
-              <select v-model="laravelStarterKit" :disabled="isRunning">
-                <option value="none">None</option>
-                <option value="react">React</option>
-                <option value="vue">Vue</option>
-                <option value="svelte">Svelte</option>
-                <option value="livewire">Livewire</option>
-              </select>
+              <span class="select-field">
+                <select v-model="laravelStarterKit" :disabled="isRunning">
+                  <option value="none">None</option>
+                  <option value="react">React</option>
+                  <option value="vue">Vue</option>
+                  <option value="svelte">Svelte</option>
+                  <option value="livewire">Livewire</option>
+                </select>
+                <span class="select-indicator" aria-hidden="true">
+                  <svg viewBox="0 0 20 20"><path d="m4.5 7 5.5 5.5L15.5 7" /></svg>
+                </span>
+              </span>
             </label>
 
             <label>
               <span>Authentication</span>
-              <select v-model="laravelAuthMode" :disabled="isRunning">
-                <option value="default">Default</option>
-                <option value="no-authentication">No authentication</option>
-                <option value="workos">WorkOS</option>
-              </select>
+              <span class="select-field">
+                <select v-model="laravelAuthMode" :disabled="isRunning">
+                  <option value="default">Default</option>
+                  <option value="no-authentication">No authentication</option>
+                  <option value="workos">WorkOS</option>
+                </select>
+                <span class="select-indicator" aria-hidden="true">
+                  <svg viewBox="0 0 20 20"><path d="m4.5 7 5.5 5.5L15.5 7" /></svg>
+                </span>
+              </span>
             </label>
 
             <label class="inline-checkbox">
@@ -267,15 +315,17 @@ async function sendInput(): Promise<void> {
           </div>
 
           <p v-if="status?.fallbackUsed" class="empty-note">Primary scaffold failed and fallback command was used.</p>
-          <p v-if="localError" class="error-note">{{ localError }}</p>
+          <p v-if="localError" class="error-note" role="alert">{{ localError }}</p>
         </section>
 
         <section class="new-project-output">
           <h3>Scaffold Output</h3>
-          <pre class="provision-log">{{ logs || 'No output yet.' }}</pre>
+          <pre class="provision-log" role="log" aria-live="polite" aria-label="Scaffold output">{{ logs || 'No output yet.' }}</pre>
 
           <div class="provision-input-row">
+            <label class="sr-only" for="scaffold-input">Input for the scaffold process</label>
             <input
+              id="scaffold-input"
               v-model="inputLine"
               type="text"
               placeholder="Send input to scaffold process..."

@@ -4,6 +4,18 @@ import type { AppConfig, ProjectConfig, ProjectFramework, TaskConfig } from '../
 
 const CONFIG_FILE = 'exedeck.config.json'
 export const CONFIG_SCHEMA_VERSION = 3
+const MAX_PROJECTS = 100
+const MAX_TASKS_PER_PROJECT = 200
+const MAX_ARGS_PER_TASK = 512
+
+function cleanString(value: unknown, fallback: string, maxLength: number): string {
+  if (typeof value !== 'string') {
+    return fallback
+  }
+
+  const cleaned = value.replace(/\0/g, '').trim()
+  return (cleaned || fallback).slice(0, maxLength)
+}
 
 function makeId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -11,12 +23,15 @@ function makeId(prefix: string): string {
 
 function toStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === 'string')
+    return value
+      .filter((item): item is string => typeof item === 'string')
+      .slice(0, MAX_ARGS_PER_TASK)
+      .map((item) => item.replace(/\0/g, '').slice(0, 4096))
   }
 
   if (typeof value === 'string') {
     const trimmed = value.trim()
-    return trimmed ? trimmed.split(/\s+/) : []
+    return trimmed ? trimmed.split(/\s+/).slice(0, MAX_ARGS_PER_TASK) : []
   }
 
   return []
@@ -26,9 +41,9 @@ function normalizeTask(raw: unknown, fallbackCwd: string, index: number): TaskCo
   const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
 
   return {
-    id: typeof source.id === 'string' ? source.id : makeId('task'),
-    name: typeof source.name === 'string' ? source.name : `Task ${index + 1}`,
-    command: typeof source.command === 'string' ? source.command : '',
+    id: cleanString(source.id, makeId('task'), 128),
+    name: cleanString(source.name, `Task ${index + 1}`, 120),
+    command: cleanString(source.command, '', 2048),
     args: toStringArray(source.args),
     cwd: fallbackCwd,
     autoStart: source.autoStart === true,
@@ -37,7 +52,8 @@ function normalizeTask(raw: unknown, fallbackCwd: string, index: number): TaskCo
 
 function normalizeProject(raw: unknown, repoRoot: string, index: number): ProjectConfig {
   const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
-  const projectPath = typeof source.path === 'string' ? source.path : repoRoot
+  const rawProjectPath = cleanString(source.path, repoRoot, 4096)
+  const projectPath = path.resolve(repoRoot, rawProjectPath)
   const rawTasks = Array.isArray(source.tasks) ? source.tasks : []
   const framework: ProjectFramework =
     source.framework === 'laravel' || source.framework === 'adonisjs' || source.framework === 'custom'
@@ -45,12 +61,14 @@ function normalizeProject(raw: unknown, repoRoot: string, index: number): Projec
       : 'custom'
 
   return {
-    id: typeof source.id === 'string' ? source.id : makeId('project'),
-    name: typeof source.name === 'string' ? source.name : `Project ${index + 1}`,
+    id: cleanString(source.id, makeId('project'), 128),
+    name: cleanString(source.name, `Project ${index + 1}`, 120),
     path: projectPath,
     framework,
     autoStart: source.autoStart === true,
-    tasks: rawTasks.map((task, taskIndex) => normalizeTask(task, projectPath, taskIndex)),
+    tasks: rawTasks
+      .slice(0, MAX_TASKS_PER_PROJECT)
+      .map((task, taskIndex) => normalizeTask(task, projectPath, taskIndex)),
   }
 }
 
@@ -90,7 +108,9 @@ export function normalizeConfig(candidate: unknown, repoRoot: string): AppConfig
 
   const source = candidate as Record<string, unknown>
   const rawProjects = Array.isArray(source.projects) ? source.projects : []
-  const projects = rawProjects.map((project, index) => normalizeProject(project, repoRoot, index))
+  const projects = rawProjects
+    .slice(0, MAX_PROJECTS)
+    .map((project, index) => normalizeProject(project, repoRoot, index))
 
   const onboardingCompleted =
     typeof source.onboardingCompleted === 'boolean' ? source.onboardingCompleted : projects.length > 0
@@ -115,19 +135,38 @@ export async function loadOrCreateConfig(userDataDir: string, repoRoot: string):
 
   try {
     const raw = await fs.readFile(configPath, 'utf8')
-    const parsed = JSON.parse(raw) as unknown
-    const normalized = normalizeConfig(parsed, repoRoot)
-    await saveConfig(userDataDir, normalized)
-    return normalized
-  } catch {
-    const defaults = createDefaultConfig(repoRoot)
-    await saveConfig(userDataDir, defaults)
-    return defaults
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      const normalized = normalizeConfig(parsed, repoRoot)
+      await saveConfig(userDataDir, normalized)
+      return normalized
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) {
+        throw error
+      }
+
+      const backupPath = `${configPath}.invalid-${Date.now()}`
+      await fs.rename(configPath, backupPath)
+    }
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
+    if (code !== 'ENOENT') {
+      throw error
+    }
   }
+
+  const defaults = createDefaultConfig(repoRoot)
+  await saveConfig(userDataDir, defaults)
+  return defaults
 }
 
 export async function saveConfig(userDataDir: string, config: AppConfig): Promise<void> {
   const configPath = getConfigPath(userDataDir)
+  const temporaryPath = `${configPath}.${process.pid}.tmp`
   await fs.mkdir(userDataDir, { recursive: true })
-  await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf8')
+  await fs.writeFile(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  })
+  await fs.rename(temporaryPath, configPath)
 }

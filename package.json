@@ -1,7 +1,7 @@
 {
     "name": "exedeck",
     "version": "1.0.0",
-    "description": "",
+    "description": "A secure cross-platform workspace for running and monitoring development processes.",
     "license": "ISC",
     "author": {
         "name": "avendor",
@@ -11,31 +11,37 @@
     "main": "out/main/main.js",
     "scripts": {
         "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "test:a11y": "npm run build && node scripts/accessibility-smoke.mjs",
+        "check": "npm run typecheck && npm test && npm run build",
         "build": "electron-vite build",
         "pack": "npm run build && electron-builder --dir",
         "dist": "npm run build && electron-builder",
         "dist:win": "npm run build && electron-builder --win nsis",
         "dist:linux": "npm run build && electron-builder --linux AppImage deb",
-        "smoke": "cross-env SMOKE=1 electron --no-sandbox .",
+        "smoke": "cross-env SMOKE=1 electron .",
         "start": "electron .",
-        "start:linux": "electron --no-sandbox ."
+        "start:linux": "electron ."
     },
     "devDependencies": {
         "@types/node": "^25.3",
         "@vitejs/plugin-vue": "^6.0.4",
+        "axe-core": "^4.12.1",
         "cross-env": "^10.1.0",
-        "electron": "^40.6",
-        "electron-builder": "^26.7.0",
+        "electron": "^40.10.6",
+        "electron-builder": "^26.8.1",
         "electron-vite": "^5.0.0",
-        "typescript": "^5.9.3"
+        "typescript": "^5.9.3",
+        "vitest": "^4.1.10",
+        "ws": "^8.21.0"
     },
     "dependencies": {
+        "@xterm/addon-fit": "^0.11.0",
+        "@xterm/xterm": "^6.0",
         "node-pty": "^1.1.0",
         "pidusage": "^4.0.1",
         "tree-kill": "^1.2.2",
-        "vue": "^3.5",
-        "@xterm/xterm": "^6.0",
-        "@xterm/addon-fit": "^0.11.0"
+        "vue": "^3.5"
     },
     "build": {
         "appId": "com.exedeck.app",
@@ -78,5 +84,12 @@
             "category": "Development",
             "maintainer": "avendor <avendor@example.com>"
         }
+    },
+    "allowScripts": {
+        "electron@40.10.6": true,
+        "esbuild@0.25.12": true,
+        "esbuild@0.28.1": true,
+        "node-pty@1.1.0": true,
+        "electron-winstaller@5.4.0": true
     }
 }

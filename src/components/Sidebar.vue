@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ProjectConfig, TaskConfig } from '../../shared/types'
 
 const props = defineProps<{
@@ -24,6 +24,7 @@ const emit = defineEmits<{
 
 const formatCpu = (taskId: string): string => `${props.getStats(taskId).cpu.toFixed(1)}%`
 const formatMem = (taskId: string): string => `${props.getStats(taskId).memoryMb.toFixed(0)} MB`
+const searchRef = ref<HTMLInputElement | null>(null)
 
 const isCollapsed = (projectId: string): boolean => props.collapsedByProject[projectId] === true
 
@@ -38,7 +39,10 @@ const projectViews = computed<ProjectView[]>(() => {
   const query = props.filterText.trim().toLowerCase()
 
   return props.projects.map((project) => {
-    const tasks = query ? project.tasks.filter((task) => task.name.toLowerCase().includes(query)) : project.tasks
+    const projectMatches = project.name.toLowerCase().includes(query)
+    const tasks = query && !projectMatches
+      ? project.tasks.filter((task) => task.name.toLowerCase().includes(query))
+      : project.tasks
     const runningCount = project.tasks.filter((task) => props.isRunning(task.id)).length
 
     return {
@@ -47,42 +51,76 @@ const projectViews = computed<ProjectView[]>(() => {
       runningCount,
       collapsed: isCollapsed(project.id),
     }
-  })
+  }).filter((view) => !query || view.project.name.toLowerCase().includes(query) || view.tasks.length > 0)
 })
 
 const onToggleProject = (projectId: string): void => {
   emit('selectProject', projectId)
   emit('toggleProjectCollapsed', projectId, !isCollapsed(projectId))
 }
+
+function focusSearch(): void {
+  searchRef.value?.focus()
+  searchRef.value?.select()
+}
+
+defineExpose({ focusSearch })
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar" aria-label="Projects and tasks">
+    <header class="sidebar-brand">
+      <div class="app-mark" aria-hidden="true">E</div>
+      <div>
+        <strong>Exedeck</strong>
+        <span>Process workspace</span>
+      </div>
+    </header>
     <div class="sidebar-controls">
       <div class="sidebar-search">
+        <label class="sr-only" for="task-filter">Filter projects and tasks</label>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5" /><path d="m12.5 12.5 4 4" /></svg>
         <input
+          id="task-filter"
+          ref="searchRef"
           :value="filterText"
-          type="text"
-          placeholder="Filter processes..."
+          type="search"
+          placeholder="Filter projects and tasks"
+          autocomplete="off"
           @input="emit('updateFilter', ($event.target as HTMLInputElement).value)"
         />
       </div>
       <div class="sidebar-actions">
-        <button type="button" class="small primary new-project-button" @click="emit('createProject')">+ New Project</button>
+        <button type="button" class="new-project-button" @click="emit('createProject')">
+          <span class="new-project-icon" aria-hidden="true">
+            <svg viewBox="0 0 20 20"><path d="M10 4v12M4 10h12" /></svg>
+          </span>
+          <span>New project</span>
+          <span class="new-project-hint" aria-hidden="true">Create</span>
+        </button>
       </div>
     </div>
 
-    <div class="sidebar-projects">
+    <nav class="sidebar-projects" aria-label="Project tasks">
       <section v-for="view in projectViews" :key="view.project.id" class="project-group">
         <div class="project-row" :class="{ active: view.project.id === selectedProjectId }">
           <button
             class="project-row-main"
             type="button"
+            :aria-expanded="!view.collapsed"
+            :aria-controls="`tasks-${view.project.id}`"
             @click="onToggleProject(view.project.id)"
           >
-            <span class="chevron">{{ view.collapsed ? '▸' : '▾' }}</span>
-            <span class="project-name">{{ view.project.name }}</span>
-            <span class="project-summary">{{ view.runningCount }}/{{ view.project.tasks.length }}</span>
+            <span class="chevron" aria-hidden="true">{{ view.collapsed ? '›' : '⌄' }}</span>
+            <span class="project-identity">
+              <span class="project-glyph" aria-hidden="true">
+                <svg viewBox="0 0 20 20"><path d="M3.5 6.5h5l1.5 2h6.5v7h-13z" /><path d="M3.5 6.5V4.8h5.2l1.4 1.7" /></svg>
+              </span>
+              <span class="project-name">{{ view.project.name }}</span>
+            </span>
+            <span class="project-summary" :title="`${view.runningCount} of ${view.project.tasks.length} tasks running`">
+              <span>{{ view.runningCount }}</span>/{{ view.project.tasks.length }}
+            </span>
           </button>
 
           <button
@@ -101,29 +139,39 @@ const onToggleProject = (projectId: string): void => {
           </button>
         </div>
 
-        <div v-if="!view.collapsed" class="task-list">
+        <div v-if="!view.collapsed" :id="`tasks-${view.project.id}`" class="task-list">
           <button
             v-for="task in view.tasks"
             :key="task.id"
             class="task-row"
             :class="{ selected: task.id === selectedTaskId }"
             type="button"
+            :aria-current="task.id === selectedTaskId ? 'page' : undefined"
             @click="emit('selectTask', view.project.id, task.id)"
             @dblclick="emit('start', task.id)"
           >
             <span class="task-left">
-              <span class="status-dot" :class="{ running: isRunning(task.id) }" />
-              <span class="task-name">{{ task.name }}</span>
+              <span class="task-glyph" :class="{ running: isRunning(task.id) }" aria-hidden="true">
+                <span>&gt;_</span>
+                <i />
+              </span>
+              <span class="sr-only">{{ isRunning(task.id) ? 'Running' : 'Stopped' }}:</span>
+              <span class="task-copy">
+                <span class="task-name">{{ task.name }}</span>
+                <span v-if="isRunning(task.id)" class="task-state">Running</span>
+              </span>
             </span>
-            <span class="task-right">
-              <span class="metric">{{ formatCpu(task.id) }}</span>
-              <span class="metric">{{ formatMem(task.id) }}</span>
+            <span v-if="isRunning(task.id)" class="task-right">
+              <span class="metric" :aria-label="`CPU ${formatCpu(task.id)}`">{{ isRunning(task.id) ? formatCpu(task.id) : '—' }}</span>
+              <span class="metric" :aria-label="`Memory ${formatMem(task.id)}`">{{ isRunning(task.id) ? formatMem(task.id) : '—' }}</span>
             </span>
+            <span v-else class="task-disclosure" aria-hidden="true">›</span>
           </button>
 
           <p v-if="view.tasks.length === 0" class="empty-note">No matching tasks.</p>
         </div>
       </section>
-    </div>
+      <p v-if="projectViews.length === 0" class="sidebar-empty">No projects or tasks match your filter.</p>
+    </nav>
   </aside>
 </template>

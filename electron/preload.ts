@@ -11,11 +11,12 @@ import type {
   TaskExitEvent,
   TaskStatsEvent,
   TaskStatusEvent,
+  TaskRuntimeSnapshot,
 } from '../shared/types'
 
 const api: ExedeckApi = {
   configGet: () => ipcRenderer.invoke('config:get') as Promise<AppConfig>,
-  configSet: (config) => ipcRenderer.invoke('config:set', config) as Promise<boolean>,
+  configSet: (config) => ipcRenderer.invoke('config:set', config) as Promise<AppConfig>,
   pickDirectory: (initialPath) => ipcRenderer.invoke('dialog:pick-directory', initialPath) as Promise<string | null>,
   projectDefaultDirectory: () => ipcRenderer.invoke('project:default-directory') as Promise<string>,
   projectCreate: (request) => ipcRenderer.invoke('project:create', request as ProjectCreateRequest) as Promise<string | null>,
@@ -27,6 +28,7 @@ const api: ExedeckApi = {
   taskRestart: (taskId) => ipcRenderer.invoke('task:restart', taskId) as Promise<boolean>,
   taskInput: (taskId, data) => ipcRenderer.invoke('task:input', taskId, data) as Promise<boolean>,
   taskResize: (taskId, cols, rows) => ipcRenderer.invoke('task:resize', taskId, cols, rows) as Promise<boolean>,
+  taskGetStatus: (taskId) => ipcRenderer.invoke('task:get-status', taskId) as Promise<TaskRuntimeSnapshot>,
   taskGetBuffer: (taskId) => ipcRenderer.invoke('task:get-buffer', taskId) as Promise<string>,
   taskClearBuffer: (taskId) => ipcRenderer.invoke('task:clear-buffer', taskId) as Promise<boolean>,
   onProjectCreateData: (listener) => {

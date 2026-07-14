@@ -5,7 +5,7 @@ export function createId(prefix: string): string {
 export function formatArgs(args: string[]): string {
   return args
     .map((arg) => {
-      if (/\s/.test(arg)) {
+      if (!arg || /[\s"']/.test(arg)) {
         return JSON.stringify(arg)
       }
       return arg
@@ -21,6 +21,7 @@ export function parseArgs(value: string): string[] {
   }
 
   let token = ''
+  let tokenStarted = false
   let quote: '"' | "'" | null = null
 
   for (let i = 0; i < input.length; i += 1) {
@@ -30,8 +31,13 @@ export function parseArgs(value: string): string[] {
       if (char === quote) {
         quote = null
       } else if (char === '\\' && i + 1 < input.length) {
-        i += 1
-        token += input[i]
+        const next = input[i + 1]
+        if (next === quote || next === '\\') {
+          i += 1
+          token += next
+        } else {
+          token += char
+        }
       } else {
         token += char
       }
@@ -40,21 +46,31 @@ export function parseArgs(value: string): string[] {
 
     if (char === '"' || char === "'") {
       quote = char
+      tokenStarted = true
+      continue
+    }
+
+    if (char === '\\' && i + 1 < input.length && /[\s\\"']/.test(input[i + 1])) {
+      i += 1
+      token += input[i]
+      tokenStarted = true
       continue
     }
 
     if (/\s/.test(char)) {
-      if (token) {
+      if (tokenStarted) {
         result.push(token)
         token = ''
+        tokenStarted = false
       }
       continue
     }
 
     token += char
+    tokenStarted = true
   }
 
-  if (token) {
+  if (tokenStarted) {
     result.push(token)
   }
 

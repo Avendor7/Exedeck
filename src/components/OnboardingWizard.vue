@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import type { AppConfig, ProjectConfig, TaskConfig } from '../../shared/types'
 import { createId, parseArgs } from '../utils/commandArgs'
+import { useDialogFocus } from '../composables/useDialogFocus'
 
 interface DraftTask {
   id: string
@@ -18,6 +19,10 @@ const emit = defineEmits<{
 const projectName = ref('Exedeck Project')
 const projectPath = ref('.')
 const projectAutoStart = ref(false)
+const dialogRef = ref<HTMLElement | null>(null)
+const localError = ref('')
+
+useDialogFocus(dialogRef)
 
 const tasks = ref<DraftTask[]>([
   {
@@ -51,6 +56,10 @@ async function pickProjectPath(): Promise<void> {
 }
 
 function submit(): void {
+  if (!canSubmit.value) {
+    localError.value = 'Enter a project name and choose its folder to continue.'
+    return
+  }
   const nextTasks: TaskConfig[] = tasks.value
     .filter((task) => task.name.trim() || task.command.trim())
     .map((task) => ({
@@ -79,20 +88,44 @@ function submit(): void {
 
   emit('complete', nextConfig)
 }
+
+const canSubmit = computed(() => Boolean(projectName.value.trim() && projectPath.value.trim()))
+
+onMounted(async () => {
+  try {
+    const defaultDirectory = await window.exedeck.projectDefaultDirectory()
+    if (defaultDirectory.trim()) {
+      projectPath.value = defaultDirectory
+    }
+  } catch {
+    // The editable fallback path remains available if the native lookup fails.
+  }
+})
 </script>
 
 <template>
-  <div class="modal-overlay onboarding" role="dialog" aria-modal="true">
-    <section class="onboarding-card">
+  <div class="modal-overlay onboarding">
+    <section
+      ref="dialogRef"
+      class="onboarding-card"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="onboarding-title"
+      tabindex="-1"
+    >
       <header class="onboarding-head">
-        <h2>Welcome to Exedeck</h2>
-        <p>Create your first project and choose which commands auto-start on launch.</p>
+        <div class="app-mark large" aria-hidden="true">E</div>
+        <div>
+          <span class="modal-eyebrow">Welcome</span>
+          <h2 id="onboarding-title">Set up your first workspace</h2>
+          <p>Add an existing project and the commands you use while developing.</p>
+        </div>
       </header>
 
       <div class="form-grid">
         <label>
           <span>Project name</span>
-          <input v-model="projectName" type="text" />
+          <input v-model="projectName" type="text" autocomplete="off" autofocus />
         </label>
 
         <label>
@@ -146,7 +179,8 @@ function submit(): void {
       </div>
 
       <footer class="onboarding-footer">
-        <button type="button" class="primary" @click="submit">Create Project</button>
+        <p v-if="localError" class="error-note" role="alert">{{ localError }}</p>
+        <button type="button" class="primary" :disabled="!canSubmit" @click="submit">Create workspace</button>
       </footer>
     </section>
   </div>

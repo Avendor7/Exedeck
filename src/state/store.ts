@@ -6,6 +6,7 @@ const selectedProjectId = ref<string>('')
 const selectedTaskId = ref<string>('')
 const filterText = ref('')
 const projectCollapsedById = ref<Record<string, boolean>>({})
+const lastError = ref('')
 
 const taskBuffers = ref<Record<string, string>>({})
 const taskRunning = ref<Record<string, boolean>>({})
@@ -96,14 +97,16 @@ function ensureSelections(nextConfig: AppConfig | null): void {
 }
 
 async function hydrateTaskBuffers(tasks: TaskConfig[]): Promise<void> {
-  for (const task of tasks) {
-    if (Object.hasOwn(taskBuffers.value, task.id)) {
-      continue
-    }
-
-    const buffer = await window.exedeck.taskGetBuffer(task.id)
-    taskBuffers.value[task.id] = buffer
-  }
+  await Promise.all(
+    tasks.map(async (task) => {
+      const [buffer, status] = await Promise.all([
+        window.exedeck.taskGetBuffer(task.id),
+        window.exedeck.taskGetStatus(task.id),
+      ])
+      taskBuffers.value[task.id] = buffer
+      taskRunning.value[task.id] = status.running
+    }),
+  )
 }
 
 function withOnboardingState(nextConfig: AppConfig): AppConfig {
@@ -184,19 +187,31 @@ export function useStore() {
   }
 
   const loadConfig = async (): Promise<void> => {
-    attachTaskListeners()
-    const nextConfig = await window.exedeck.configGet()
-    config.value = nextConfig
-    ensureSelections(config.value)
-    await hydrateTaskBuffers(nextConfig.projects.flatMap((item) => item.tasks))
+    try {
+      lastError.value = ''
+      attachTaskListeners()
+      const nextConfig = await window.exedeck.configGet()
+      config.value = nextConfig
+      ensureSelections(config.value)
+      await hydrateTaskBuffers(nextConfig.projects.flatMap((item) => item.tasks))
+    } catch (error) {
+      lastError.value = error instanceof Error ? error.message : 'Could not load the application configuration.'
+      throw error
+    }
   }
 
   const saveConfig = async (nextConfig: AppConfig): Promise<void> => {
-    const prepared = withOnboardingState(nextConfig)
-    await window.exedeck.configSet(prepared)
-    config.value = prepared
-    ensureSelections(config.value)
-    await hydrateTaskBuffers(prepared.projects.flatMap((item) => item.tasks))
+    try {
+      lastError.value = ''
+      const prepared = withOnboardingState(nextConfig)
+      const savedConfig = await window.exedeck.configSet(prepared)
+      config.value = savedConfig
+      ensureSelections(config.value)
+      await hydrateTaskBuffers(savedConfig.projects.flatMap((item) => item.tasks))
+    } catch (error) {
+      lastError.value = error instanceof Error ? error.message : 'Could not save the application configuration.'
+      throw error
+    }
   }
 
   const setSelectedTaskId = (taskId: string): void => {
@@ -216,15 +231,24 @@ export function useStore() {
   }
 
   const startTask = async (taskId: string): Promise<void> => {
-    await window.exedeck.taskStart(taskId)
+    lastError.value = ''
+    if (!(await window.exedeck.taskStart(taskId))) {
+      lastError.value = 'The task could not be started. Check its command and working directory.'
+    }
   }
 
   const stopTask = async (taskId: string): Promise<void> => {
-    await window.exedeck.taskStop(taskId)
+    lastError.value = ''
+    if (!(await window.exedeck.taskStop(taskId))) {
+      lastError.value = 'The task did not stop cleanly.'
+    }
   }
 
   const restartTask = async (taskId: string): Promise<void> => {
-    await window.exedeck.taskRestart(taskId)
+    lastError.value = ''
+    if (!(await window.exedeck.taskRestart(taskId))) {
+      lastError.value = 'The task could not be restarted.'
+    }
   }
 
   const inputTask = async (taskId: string, data: string): Promise<void> => {
@@ -236,8 +260,13 @@ export function useStore() {
   }
 
   const clearTaskBuffer = async (taskId: string): Promise<void> => {
-    await window.exedeck.taskClearBuffer(taskId)
-    taskBuffers.value[taskId] = ''
+    if (await window.exedeck.taskClearBuffer(taskId)) {
+      taskBuffers.value[taskId] = ''
+    }
+  }
+
+  const clearError = (): void => {
+    lastError.value = ''
   }
 
   return {
@@ -247,6 +276,7 @@ export function useStore() {
     onboardingRequired,
     filterText,
     projectCollapsedById,
+    lastError,
     selectedTask,
     selectedTaskId,
     selectedProjectId,
@@ -266,5 +296,6 @@ export function useStore() {
     inputTask,
     resizeTask,
     clearTaskBuffer,
+    clearError,
   }
 }

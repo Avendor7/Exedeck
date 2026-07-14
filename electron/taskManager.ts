@@ -67,21 +67,21 @@ export class TaskManager {
     let child: pty.IPty
     try {
       let spawnCommand = task.command
-        let spawnArgs = task.args
-        if (process.platform === 'win32') {
-          spawnCommand = 'cmd.exe'
-          spawnArgs = ['/c', task.command, ...task.args]
-        }
-        child = pty.spawn(spawnCommand, spawnArgs, {
-          name: 'xterm-256color',
-          cols: runtime.cols,
-          rows: runtime.rows,
-          cwd,
-          env: {
-            ...process.env,
-            TERM: 'xterm-256color',
-          },
-        })
+      let spawnArgs = task.args
+      if (process.platform === 'win32') {
+        spawnCommand = process.env.ComSpec || 'cmd.exe'
+        spawnArgs = ['/d', '/s', '/c', task.command, ...task.args]
+      }
+      child = pty.spawn(spawnCommand, spawnArgs, {
+        name: 'xterm-256color',
+        cols: runtime.cols,
+        rows: runtime.rows,
+        cwd,
+        env: {
+          ...process.env,
+          TERM: 'xterm-256color',
+        },
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const chunk = `\r\n[exedeck] Failed to start task "${task.name}": ${message}\r\n`
@@ -118,7 +118,11 @@ export class TaskManager {
     }
 
     const child = runtime.process
-    child.write('\u0003')
+    try {
+      child.write('\u0003')
+    } catch {
+      // The PTY may have exited between the runtime check and the write.
+    }
 
     const stoppedByCtrlC = await this.waitForExit(taskId, 1500)
     if (stoppedByCtrlC) {
@@ -131,7 +135,10 @@ export class TaskManager {
   }
 
   async restartTask(taskId: string): Promise<boolean> {
-    await this.stopTask(taskId)
+    const stopped = await this.stopTask(taskId)
+    if (!stopped) {
+      return false
+    }
     return this.startTask(taskId)
   }
 
@@ -141,8 +148,12 @@ export class TaskManager {
       return false
     }
 
-    runtime.process.write(data)
-    return true
+    try {
+      runtime.process.write(data)
+      return true
+    } catch {
+      return false
+    }
   }
 
   resizeTask(taskId: string, cols: number, rows: number): boolean {
@@ -152,8 +163,12 @@ export class TaskManager {
     }
 
     const runtime = this.ensureRuntime(resolved.task)
-    const safeCols = Number.isFinite(cols) ? Math.max(20, Math.floor(cols)) : this.defaultCols
-    const safeRows = Number.isFinite(rows) ? Math.max(5, Math.floor(rows)) : this.defaultRows
+    const safeCols = Number.isFinite(cols)
+      ? Math.min(1000, Math.max(20, Math.floor(cols)))
+      : this.defaultCols
+    const safeRows = Number.isFinite(rows)
+      ? Math.min(500, Math.max(5, Math.floor(rows)))
+      : this.defaultRows
 
     runtime.cols = safeCols
     runtime.rows = safeRows
@@ -202,10 +217,74 @@ export class TaskManager {
     return this.runtimes.get(taskId)?.process?.pid
   }
 
+  getTaskStatus(taskId: string): { running: boolean; pid?: number } {
+    const runtime = this.runtimes.get(taskId)
+    return {
+      running: runtime?.running ?? false,
+      ...(runtime?.process?.pid ? { pid: runtime.process.pid } : {}),
+    }
+  }
+
   listRunningTaskIds(): string[] {
     return Array.from(this.runtimes.entries())
       .filter(([, runtime]) => runtime.running)
       .map(([taskId]) => taskId)
+  }
+
+  async reconcileConfig(nextConfig: AppConfig): Promise<void> {
+    const nextTasks = new Map<string, TaskConfig>()
+    for (const project of nextConfig.projects) {
+      for (const task of project.tasks) {
+        nextTasks.set(task.id, task)
+      }
+    }
+
+    const tasksToStop = Array.from(this.runtimes.entries())
+      .filter(([, runtime]) => {
+        if (!runtime.running) {
+          return false
+        }
+
+        const nextTask = nextTasks.get(runtime.task.id)
+        return (
+          !nextTask ||
+          nextTask.command !== runtime.task.command ||
+          nextTask.cwd !== runtime.task.cwd ||
+          nextTask.args.join('\0') !== runtime.task.args.join('\0')
+        )
+      })
+      .map(([taskId]) => taskId)
+
+    await Promise.all(tasksToStop.map((taskId) => this.stopTask(taskId)))
+
+    for (const [taskId, runtime] of this.runtimes) {
+      const nextTask = nextTasks.get(taskId)
+      if (nextTask) {
+        runtime.task = nextTask
+      } else if (!runtime.running) {
+        this.runtimes.delete(taskId)
+      }
+    }
+  }
+
+  async stopAll(): Promise<void> {
+    await Promise.all(this.listRunningTaskIds().map((taskId) => this.stopTask(taskId)))
+  }
+
+  killAllImmediately(): void {
+    for (const runtime of this.runtimes.values()) {
+      if (!runtime.process) {
+        continue
+      }
+
+      try {
+        runtime.process.kill()
+      } catch {
+        // The operating system may already have reaped the child process.
+      }
+      runtime.running = false
+      runtime.process = undefined
+    }
   }
 
   private ensureRuntime(task: TaskConfig): TaskRuntime {
