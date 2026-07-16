@@ -171,7 +171,7 @@ async function startCreate(): Promise<void> {
   status.value = null
   localError.value = ''
 
-  let nextJobId: string | null = null
+  let nextJobId: string | null
   try {
     nextJobId = await window.exedeck.projects.create({
       framework: framework.value,
@@ -200,7 +200,8 @@ async function startCreate(): Promise<void> {
   jobId.value = nextJobId
   const snapshot = await window.exedeck.projects.createGet(nextJobId)
   if (snapshot) {
-    status.value = snapshot
+    status.value = snapshot.status
+    logs.value = sanitizeTerminalChunk(snapshot.buffer)
   }
 }
 
@@ -260,7 +261,14 @@ async function sendInput(): Promise<void> {
 
           <label>
             <span>Project name</span>
-            <input v-model="projectName" type="text" placeholder="my-app" autocomplete="off" autofocus :disabled="isRunning" />
+            <input
+              v-model="projectName"
+              type="text"
+              placeholder="my-app"
+              autocomplete="off"
+              autofocus
+              :disabled="isRunning"
+            />
           </label>
 
           <label>
@@ -306,7 +314,9 @@ async function sendInput(): Promise<void> {
               <input v-model="laravelBoost" type="checkbox" :disabled="isRunning" />
               <span>Install Laravel Boost</span>
             </label>
-            <p class="empty-note">SQLite is always configured and npm dependencies are installed and built automatically.</p>
+            <p class="empty-note">
+              SQLite is always configured and npm dependencies are installed and built automatically.
+            </p>
           </template>
 
           <div class="wizard-actions">
@@ -320,7 +330,9 @@ async function sendInput(): Promise<void> {
 
         <section class="new-project-output">
           <h3>Scaffold Output</h3>
-          <pre class="provision-log" role="log" aria-live="polite" aria-label="Scaffold output">{{ logs || 'No output yet.' }}</pre>
+          <pre class="provision-log" role="log" aria-live="polite" aria-label="Scaffold output">{{
+            logs || 'No output yet.'
+          }}</pre>
 
           <div class="provision-input-row">
             <label class="sr-only" for="scaffold-input">Input for the scaffold process</label>
@@ -332,7 +344,9 @@ async function sendInput(): Promise<void> {
               :disabled="!isRunning"
               @keyup.enter="sendInput"
             />
-            <button type="button" class="small" :disabled="!isRunning || !inputLine.trim()" @click="sendInput">Send</button>
+            <button type="button" class="small" :disabled="!isRunning || !inputLine.trim()" @click="sendInput">
+              Send
+            </button>
           </div>
         </section>
       </div>

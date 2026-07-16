@@ -1,5 +1,6 @@
 import * as pty from 'node-pty'
 import kill from 'tree-kill'
+import { resolvePtySpawnCommand } from './processCommand'
 
 export interface ProcessDefinition {
   id: string
@@ -54,13 +55,8 @@ export class ProcessRuntimeManager {
 
     let child: pty.IPty
     try {
-      let spawnCommand = definition.command
-      let spawnArgs = definition.args
-      if (process.platform === 'win32') {
-        spawnCommand = process.env.ComSpec || 'cmd.exe'
-        spawnArgs = ['/d', '/s', '/c', definition.command, ...definition.args]
-      }
-      child = pty.spawn(spawnCommand, spawnArgs, {
+      const spawn = resolvePtySpawnCommand(definition.command, definition.args)
+      child = pty.spawn(spawn.command, spawn.args, {
         name: 'xterm-256color',
         cols: runtime.cols,
         rows: runtime.rows,
@@ -117,10 +113,13 @@ export class ProcessRuntimeManager {
       return true
     }
 
-    await new Promise<void>((resolve) => {
-      kill(child.pid, 'SIGTERM', () => resolve())
-    })
-    await this.waitForExit(processId, 1000)
+    await this.killTree(child.pid, 'SIGTERM')
+    if (await this.waitForExit(processId, 1000)) {
+      return true
+    }
+
+    await this.killTree(child.pid, 'SIGKILL')
+    await this.waitForExit(processId, 500)
     return !runtime.running
   }
 
@@ -193,6 +192,10 @@ export class ProcessRuntimeManager {
       .map(([id]) => id)
   }
 
+  listIds(): string[] {
+    return Array.from(this.runtimes.keys())
+  }
+
   forget(processId: string): void {
     if (!this.isRunning(processId)) {
       this.runtimes.delete(processId)
@@ -206,6 +209,9 @@ export class ProcessRuntimeManager {
   killAllImmediately(): void {
     for (const runtime of this.runtimes.values()) {
       try {
+        if (runtime.process?.pid) {
+          kill(runtime.process.pid, 'SIGKILL', () => undefined)
+        }
         runtime.process?.kill()
       } catch {
         // The process may already be gone.
@@ -234,9 +240,7 @@ export class ProcessRuntimeManager {
 
   private pushToBuffer(existing: string, chunk: string): string {
     const combined = existing + chunk
-    return combined.length <= this.maxBufferChars
-      ? combined
-      : combined.slice(combined.length - this.maxBufferChars)
+    return combined.length <= this.maxBufferChars ? combined : combined.slice(combined.length - this.maxBufferChars)
   }
 
   private waitForExit(processId: string, timeoutMs: number): Promise<boolean> {
@@ -248,6 +252,12 @@ export class ProcessRuntimeManager {
           resolve(!this.isRunning(processId))
         }
       }, 50)
+    })
+  }
+
+  private killTree(pid: number, signal: string): Promise<void> {
+    return new Promise((resolve) => {
+      kill(pid, signal, () => resolve())
     })
   }
 }

@@ -15,6 +15,7 @@ Goal: Add project-level metadata so Exedeck can manage stack-specific behavior.
 Tickets:
 
 1. Add schema v3 for project metadata (`S`)
+
 - Add `project.kind` (`laravel | node | custom`)
 - Add `project.services` (initially optional map/object)
 - Acceptance:
@@ -22,6 +23,7 @@ Tickets:
   - New configs persist v3 fields
 
 2. Add migration from v2 to v3 (`S`)
+
 - Map existing projects to `kind: custom`
 - Preserve existing task behavior
 - Acceptance:
@@ -29,6 +31,7 @@ Tickets:
   - Re-saving config does not mutate unrelated fields
 
 3. Extend shared types + preload API contracts (`S`)
+
 - Update shared TS interfaces for new fields
 - Keep renderer/main compile-safe
 - Acceptance:
@@ -45,6 +48,7 @@ Goal: Run one-off provisioning commands asynchronously with logs + status.
 Tickets:
 
 1. Implement `jobManager` in main process (`M`)
+
 - Lifecycle states: `queued | running | success | failed | canceled`
 - Capture stdout/stderr stream
 - Keep in-memory job registry
@@ -53,6 +57,7 @@ Tickets:
   - Job status transitions are deterministic
 
 2. Add provisioning IPC endpoints (`M`)
+
 - `project:create`
 - `project:create:status`
 - `project:create:cancel`
@@ -61,6 +66,7 @@ Tickets:
   - Failed jobs return useful error payloads
 
 3. Add event channel(s) for live job output (`S`)
+
 - Example: `job:data`, `job:status`
 - Acceptance:
   - Output appears live in UI
@@ -77,6 +83,7 @@ Goal: Create projects through stack-aware command templates.
 Tickets:
 
 1. Laravel provisioner (`M`)
+
 - Primary command: `laravel new <name>`
 - Fallback path if CLI unavailable (composer strategy or actionable error)
 - Acceptance:
@@ -84,6 +91,7 @@ Tickets:
   - Failures include remediation guidance
 
 2. Node provisioner (`M`)
+
 - Template options (start with one default, e.g. Vite)
 - Commands support npm/pnpm/yarn selection (initially default to npm)
 - Acceptance:
@@ -91,6 +99,7 @@ Tickets:
   - Command logs visible in job output
 
 3. Post-provision project registration (`S`)
+
 - Add project to config after successful scaffold
 - Attach default stack-specific tasks
 - Acceptance:
@@ -108,12 +117,14 @@ Goal: Expose provisioning in product with clear status UX.
 Tickets:
 
 1. Add "Create Project" entry point (`S`)
+
 - Toolbar/menu button and modal/sheet
 - Inputs: name, path, stack, package manager (optional)
 - Acceptance:
   - User can start a provisioning job without opening raw settings
 
 2. Add job progress panel (`M`)
+
 - Live output terminal/log view
 - Status and cancel action
 - Acceptance:
@@ -121,6 +132,7 @@ Tickets:
   - Cancel updates UI and state correctly
 
 3. Error UX and retries (`S`)
+
 - Show failure reason and quick retry path
 - Acceptance:
   - Failed runs are diagnosable without devtools
@@ -136,12 +148,14 @@ Goal: Auto-detect project type and generate practical starter tasks.
 Tickets:
 
 1. Filesystem detectors (`S`)
+
 - Laravel via `artisan` + `composer.json`
 - Node via `package.json`
 - Acceptance:
   - Existing directories can be classified reliably
 
 2. Task template registry (`M`)
+
 - `laravel`, `node`, `custom` templates
 - User can opt in/out per template task
 - Acceptance:
@@ -158,11 +172,13 @@ Goal: Make services first-class so monitoring/routing can attach to them.
 Tickets:
 
 1. Define service descriptors (`S`)
+
 - Example: `{ type, commandRef, port, enabled }`
 - Acceptance:
   - Services persist in config and remain backward compatible
 
 2. Bind tasks to services (`S`)
+
 - Map task ids to service roles
 - Acceptance:
   - UI can display "web", "queue", etc. per project
@@ -178,12 +194,14 @@ Goal: Route local hostnames to project web services without requiring system Ngi
 Tickets:
 
 1. Implement internal proxy worker (`M`)
+
 - Hostname -> upstream port mapping
 - Health check/reload on mapping changes
 - Acceptance:
   - Requests resolve to correct project service
 
 2. Domain management UI (`M`)
+
 - Add/edit/remove local domains per project
 - Validation for conflicts
 - Acceptance:
@@ -200,11 +218,13 @@ Goal: Allow Exedeck to manage Nginx config safely.
 Tickets:
 
 1. Provider interface for routing backends (`S`)
+
 - `internal`, `nginx` providers behind common contract
 - Acceptance:
   - Provider switch does not alter project model
 
 2. Nginx config writer + validator (`M`)
+
 - Render site config files from project domains/services
 - Validate before reload
 - Acceptance:
@@ -212,6 +232,7 @@ Tickets:
   - Rollback strategy is defined
 
 3. Nginx reload integration (`M`)
+
 - Controlled reload command and result reporting
 - Acceptance:
   - Success/failure surfaced in UI with actionable details
@@ -227,17 +248,20 @@ Goal: Provide useful visibility similar to Herd’s operational views.
 Tickets:
 
 1. Log streams by service (`M`)
+
 - Structured grouping by project/service
 - Search/filter recent logs
 - Acceptance:
   - User can isolate queue/web logs quickly
 
 2. Queue/mail health probes (`M`)
+
 - Command probes and status indicators
 - Acceptance:
   - Health state updates at interval and handles failures gracefully
 
 3. Alerting surface (`S`)
+
 - Basic warnings for crashed critical services
 - Acceptance:
   - User sees alert without opening each task
@@ -251,11 +275,13 @@ Dependencies: Epics 5, 6
 Tickets:
 
 1. Command execution safety checks (`M`)
+
 - Path validation, command allowlist strategy where appropriate
 - Acceptance:
   - Provisioning rejects unsafe or malformed inputs
 
 2. Integration test coverage (`M`)
+
 - Config migration tests
 - Job lifecycle tests
 - Provisioner success/failure paths
@@ -263,6 +289,7 @@ Tickets:
   - Core flows covered in CI
 
 3. Telemetry/logging for diagnostics (`S`)
+
 - Internal app logs for job/routing failures
 - Acceptance:
   - Support debugging without attaching debugger
@@ -272,19 +299,23 @@ Dependencies: parallel across milestones
 ## Suggested Sprint Order
 
 1. Sprint 1:
+
 - Epic 1
 - Epic 2 (ticket 1 + 2)
 
 2. Sprint 2:
+
 - Epic 2 (ticket 3)
 - Epic 3
 - Epic 4
 
 3. Sprint 3:
+
 - Epic 5
 - Epic 6
 
 4. Sprint 4+:
+
 - Epic 7
 - Epic 8 (optional, depending on parity goals)
 - Epic 9
@@ -297,4 +328,3 @@ Dependencies: parallel across milestones
 - At least one routing provider works end-to-end.
 - Monitoring surface gives practical operational visibility (logs + service health).
 - Migration and provisioning paths are covered by automated tests.
-

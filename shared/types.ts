@@ -30,13 +30,14 @@ export interface AgentProfile {
   enabled: boolean
 }
 
-export interface AgentSession {
+export interface AgentWorkspace {
   id: string
   projectId: string
   checkoutId: string
   profileId: string
   title: string
   createdAt: number
+  archivedAt?: number
   resumeId?: string
 }
 
@@ -47,6 +48,7 @@ export interface AppPreferences {
   editorCommand: string
   cloneDirectory: string
   aiProfileId: string
+  lastWorkspaceId: string
 }
 
 export interface AppConfig {
@@ -55,7 +57,7 @@ export interface AppConfig {
   projects: ProjectConfig[]
   preferences: AppPreferences
   agentProfiles: AgentProfile[]
-  agentSessions: AgentSession[]
+  agentWorkspaces: AgentWorkspace[]
 }
 
 export interface TaskDataEvent {
@@ -66,17 +68,23 @@ export interface TaskDataEvent {
 export interface TaskStatusEvent {
   taskId: string
   running: boolean
+  checkoutId?: string
 }
 
 export interface TaskRuntimeSnapshot {
   running: boolean
   pid?: number
+  checkoutId?: string
 }
 
 export interface TaskStatsEvent {
   taskId: string
   cpu: number
   memoryMb: number
+}
+
+export interface TaskStatsBatchEvent {
+  stats: TaskStatsEvent[]
 }
 
 export interface TaskExitEvent {
@@ -88,18 +96,18 @@ export interface TaskExitEvent {
 export type AgentRuntimeState = 'starting' | 'running' | 'stopped' | 'crashed'
 
 export interface AgentDataEvent {
-  sessionId: string
+  workspaceId: string
   chunk: string
 }
 
 export interface AgentStatusEvent {
-  sessionId: string
+  workspaceId: string
   state: AgentRuntimeState
   unread: boolean
 }
 
 export interface AgentExitEvent {
-  sessionId: string
+  workspaceId: string
   exitCode: number | null
   signal?: number
 }
@@ -118,8 +126,21 @@ export interface AgentToolStatus {
 }
 
 export interface AgentStartRequest {
-  sessionId: string
+  workspaceId: string
   prompt?: string
+}
+
+export interface TaskStartRequest {
+  taskId: string
+  checkoutId?: string
+}
+
+export interface TaskStartResult {
+  ok: boolean
+  running: boolean
+  alreadyRunning: boolean
+  checkoutId?: string
+  message?: string
 }
 
 export interface Checkout {
@@ -131,6 +152,63 @@ export interface Checkout {
   isMain: boolean
   locked: boolean
   busy: boolean
+}
+
+export type WorkspaceCheckoutMode = 'root' | 'worktree'
+
+export interface WorkspaceCreateRequest {
+  projectId: string
+  profileId: string
+  title: string
+  mode: WorkspaceCheckoutMode
+  checkoutId?: string
+  branch?: string
+  parentBranch?: string
+  worktreePath?: string
+  start?: boolean
+}
+
+export interface WorkspaceCreateResult {
+  ok: boolean
+  workspace?: AgentWorkspace
+  checkout?: Checkout
+  started: boolean
+  error?: string
+}
+
+export interface WorkspaceRebindRequest {
+  workspaceId: string
+  checkoutId: string
+}
+
+export interface WorkspaceFinishPreview {
+  workspaceId: string
+  agentState: AgentRuntimeState
+  checkout?: Checkout
+  checkoutMissing: boolean
+  clean: boolean
+  conflicted: boolean
+  parentBranch?: string
+  parentCheckout?: Checkout
+  rootCheckout: boolean
+  canArchive: boolean
+  canMerge: boolean
+  canRemoveWorktree: boolean
+  blockers: string[]
+}
+
+export interface WorkspaceFinishRequest {
+  workspaceId: string
+  merge: boolean
+  removeWorktree: boolean
+  deleteBranch: boolean
+}
+
+export interface WorkspaceFinishResult {
+  ok: boolean
+  completed: string[]
+  pending: string[]
+  error?: string
 }
 
 export interface GitFileChange {
@@ -246,6 +324,11 @@ export interface ProjectCreateStatusEvent {
   status: ProjectCreateStatus
 }
 
+export interface ProjectCreateSnapshot {
+  status: ProjectCreateStatus
+  buffer: string
+}
+
 export interface ProjectCreateDoneEvent {
   jobId: string
   state: Extract<ProjectCreateState, 'success' | 'failed' | 'canceled'>
@@ -261,7 +344,7 @@ export interface ProjectsApi {
   create: (request: ProjectCreateRequest) => Promise<string | null>
   createInput: (jobId: string, data: string) => Promise<boolean>
   createCancel: (jobId: string) => Promise<boolean>
-  createGet: (jobId: string) => Promise<ProjectCreateStatus | null>
+  createGet: (jobId: string) => Promise<ProjectCreateSnapshot | null>
   openExternal: (projectId: string, target: ExternalOpenTarget) => Promise<boolean>
   onCreateData: (listener: (event: ProjectCreateDataEvent) => void) => () => void
   onCreateStatus: (listener: (event: ProjectCreateStatusEvent) => void) => () => void
@@ -300,34 +383,43 @@ export interface WindowApi {
 }
 
 export interface ProcessesApi {
-  start: (taskId: string) => Promise<boolean>
+  start: (request: TaskStartRequest) => Promise<TaskStartResult>
   stop: (taskId: string) => Promise<boolean>
-  restart: (taskId: string) => Promise<boolean>
+  restart: (request: TaskStartRequest) => Promise<TaskStartResult>
   input: (taskId: string, data: string) => Promise<boolean>
   resize: (taskId: string, cols: number, rows: number) => Promise<boolean>
   getStatus: (taskId: string) => Promise<TaskRuntimeSnapshot>
+  getStatuses: () => Promise<Record<string, TaskRuntimeSnapshot>>
   getBuffer: (taskId: string) => Promise<string>
   clearBuffer: (taskId: string) => Promise<boolean>
   onData: (listener: (event: TaskDataEvent) => void) => () => void
   onStatus: (listener: (event: TaskStatusEvent) => void) => () => void
-  onStats: (listener: (event: TaskStatsEvent) => void) => () => void
+  onStats: (listener: (event: TaskStatsBatchEvent) => void) => () => void
   onExit: (listener: (event: TaskExitEvent) => void) => () => void
 }
 
 export interface AgentsApi {
   discoverTools: () => Promise<AgentToolStatus[]>
   start: (request: AgentStartRequest) => Promise<boolean>
-  stop: (sessionId: string) => Promise<boolean>
-  restart: (sessionId: string) => Promise<boolean>
-  input: (sessionId: string, data: string) => Promise<boolean>
-  resize: (sessionId: string, cols: number, rows: number) => Promise<boolean>
-  getStatus: (sessionId: string) => Promise<AgentRuntimeSnapshot>
-  getBuffer: (sessionId: string) => Promise<string>
-  clearBuffer: (sessionId: string) => Promise<boolean>
-  markRead: (sessionId: string) => Promise<boolean>
+  stop: (workspaceId: string) => Promise<boolean>
+  restart: (workspaceId: string) => Promise<boolean>
+  input: (workspaceId: string, data: string) => Promise<boolean>
+  resize: (workspaceId: string, cols: number, rows: number) => Promise<boolean>
+  getStatus: (workspaceId: string) => Promise<AgentRuntimeSnapshot>
+  getStatuses: () => Promise<Record<string, AgentRuntimeSnapshot>>
+  getBuffer: (workspaceId: string) => Promise<string>
+  clearBuffer: (workspaceId: string) => Promise<boolean>
+  markRead: (workspaceId: string) => Promise<boolean>
   onData: (listener: (event: AgentDataEvent) => void) => () => void
   onStatus: (listener: (event: AgentStatusEvent) => void) => () => void
   onExit: (listener: (event: AgentExitEvent) => void) => () => void
+}
+
+export interface WorkspacesApi {
+  create: (request: WorkspaceCreateRequest) => Promise<WorkspaceCreateResult>
+  rebind: (request: WorkspaceRebindRequest) => Promise<AgentWorkspace | null>
+  finishPreview: (workspaceId: string) => Promise<WorkspaceFinishPreview | null>
+  finish: (request: WorkspaceFinishRequest) => Promise<WorkspaceFinishResult>
 }
 
 export interface GitApi {
@@ -363,6 +455,7 @@ export interface ExedeckApi {
   projects: ProjectsApi
   processes: ProcessesApi
   agents: AgentsApi
+  workspaces: WorkspacesApi
   git: GitApi
   ai: AiApi
   window: WindowApi

@@ -1,10 +1,10 @@
 import { access } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import path from 'node:path'
 import type {
   AgentDataEvent,
   AgentExitEvent,
   AgentRuntimeSnapshot,
-  AgentSession,
   AgentStatusEvent,
   AgentToolStatus,
   AppConfig,
@@ -27,24 +27,27 @@ export class AgentManager {
 
   constructor(private readonly options: AgentManagerOptions) {
     this.runtime = new ProcessRuntimeManager({
-      onData: (sessionId, chunk) => {
-        this.unread.add(sessionId)
-        options.onData({ sessionId, chunk })
-        options.onStatus({ sessionId, state: 'running', unread: true })
+      onData: (workspaceId, chunk) => {
+        const wasUnread = this.unread.has(workspaceId)
+        this.unread.add(workspaceId)
+        options.onData({ workspaceId, chunk })
+        if (!wasUnread) {
+          options.onStatus({ workspaceId, state: 'running', unread: true })
+        }
       },
-      onStatus: (sessionId, running) => {
-        if (running) this.crashed.delete(sessionId)
+      onStatus: (workspaceId, running) => {
+        if (running) this.crashed.delete(workspaceId)
         options.onStatus({
-          sessionId,
-          state: running ? 'running' : this.crashed.has(sessionId) ? 'crashed' : 'stopped',
-          unread: this.unread.has(sessionId),
+          workspaceId,
+          state: running ? 'running' : this.crashed.has(workspaceId) ? 'crashed' : 'stopped',
+          unread: this.unread.has(workspaceId),
         })
       },
       onExit: ({ processId, exitCode, signal }) => {
         if (exitCode !== 0) this.crashed.add(processId)
-        options.onExit({ sessionId: processId, exitCode, signal })
+        options.onExit({ workspaceId: processId, exitCode, signal })
         options.onStatus({
-          sessionId: processId,
+          workspaceId: processId,
           state: exitCode === 0 ? 'stopped' : 'crashed',
           unread: this.unread.has(processId),
         })
@@ -52,122 +55,178 @@ export class AgentManager {
     })
   }
 
-  async start(sessionId: string, prompt?: string): Promise<boolean> {
-    const resolved = await this.resolveSession(sessionId)
+  async start(workspaceId: string, prompt?: string): Promise<boolean> {
+    const resolved = await this.resolveWorkspace(workspaceId)
     if (!resolved) return false
     const args = [...resolved.profile.args]
-    if (resolved.session.resumeId) {
-      if (resolved.profile.tool === 'codex') args.push('resume', resolved.session.resumeId)
-      if (resolved.profile.tool === 'claude') args.push('--resume', resolved.session.resumeId)
+    if (resolved.workspace.resumeId) {
+      if (resolved.profile.tool === 'codex') args.push('resume', resolved.workspace.resumeId)
+      if (resolved.profile.tool === 'claude') args.push('--resume', resolved.workspace.resumeId)
     }
     if (prompt?.trim()) args.push(prompt.trim().slice(0, 32_000))
-    this.options.onStatus({ sessionId, state: 'starting', unread: false })
-    this.unread.delete(sessionId)
+    this.options.onStatus({ workspaceId, state: 'starting', unread: false })
+    this.unread.delete(workspaceId)
     return this.runtime.start({
-      id: sessionId,
-      name: resolved.session.title,
+      id: workspaceId,
+      name: resolved.workspace.title,
       command: resolved.profile.command,
       args,
       cwd: resolved.checkout.path,
     })
   }
 
-  stop(sessionId: string): Promise<boolean> { return this.runtime.stop(sessionId) }
-
-  async restart(sessionId: string): Promise<boolean> {
-    if (!(await this.stop(sessionId))) return false
-    return this.start(sessionId)
+  stop(workspaceId: string): Promise<boolean> {
+    return this.runtime.stop(workspaceId)
   }
 
-  input(sessionId: string, data: string): boolean { return this.runtime.input(sessionId, data) }
+  async restart(workspaceId: string): Promise<boolean> {
+    if (!(await this.stop(workspaceId))) return false
+    return this.start(workspaceId)
+  }
 
-  async resize(sessionId: string, cols: number, rows: number): Promise<boolean> {
-    const resolved = await this.resolveSession(sessionId)
+  input(workspaceId: string, data: string): boolean {
+    return this.runtime.input(workspaceId, data)
+  }
+
+  async resize(workspaceId: string, cols: number, rows: number): Promise<boolean> {
+    const resolved = await this.resolveWorkspace(workspaceId)
     if (!resolved) return false
     this.runtime.ensure({
-      id: sessionId,
-      name: resolved.session.title,
+      id: workspaceId,
+      name: resolved.workspace.title,
       command: resolved.profile.command,
       args: resolved.profile.args,
       cwd: resolved.checkout.path,
     })
-    return this.runtime.resize(sessionId, cols, rows)
+    return this.runtime.resize(workspaceId, cols, rows)
   }
 
-  getBuffer(sessionId: string): string { return this.runtime.getBuffer(sessionId) }
-  clearBuffer(sessionId: string): boolean { return this.runtime.clearBuffer(sessionId) }
+  getBuffer(workspaceId: string): string {
+    return this.runtime.getBuffer(workspaceId)
+  }
+  clearBuffer(workspaceId: string): boolean {
+    return this.runtime.clearBuffer(workspaceId)
+  }
 
-  markRead(sessionId: string): boolean {
-    this.unread.delete(sessionId)
-    const snapshot = this.getStatus(sessionId)
-    this.options.onStatus({ sessionId, state: snapshot.state, unread: false })
+  markRead(workspaceId: string): boolean {
+    this.unread.delete(workspaceId)
+    const snapshot = this.getStatus(workspaceId)
+    this.options.onStatus({ workspaceId, state: snapshot.state, unread: false })
     return true
   }
 
-  getStatus(sessionId: string): AgentRuntimeSnapshot {
-    const status = this.runtime.getStatus(sessionId)
+  getStatus(workspaceId: string): AgentRuntimeSnapshot {
+    const status = this.runtime.getStatus(workspaceId)
     return {
-      state: status.running ? 'running' : this.crashed.has(sessionId) ? 'crashed' : 'stopped',
-      unread: this.unread.has(sessionId),
+      state: status.running ? 'running' : this.crashed.has(workspaceId) ? 'crashed' : 'stopped',
+      unread: this.unread.has(workspaceId),
       ...(status.pid ? { pid: status.pid } : {}),
     }
   }
 
-  isCheckoutBusy(checkoutId: string): boolean {
-    return this.options.getConfig().agentSessions.some(
-      (session) => session.checkoutId === checkoutId && this.runtime.isRunning(session.id),
+  getStatuses(): Record<string, AgentRuntimeSnapshot> {
+    return Object.fromEntries(
+      this.options.getConfig().agentWorkspaces.map((workspace) => [workspace.id, this.getStatus(workspace.id)]),
     )
   }
 
+  isCheckoutBusy(checkoutId: string): boolean {
+    return this.options
+      .getConfig()
+      .agentWorkspaces.some((workspace) => workspace.checkoutId === checkoutId && this.runtime.isRunning(workspace.id))
+  }
+
   async discoverTools(): Promise<AgentToolStatus[]> {
-    return Promise.all(this.options.getConfig().agentProfiles.map(async (profile) => {
-      const resolvedPath = await findExecutable(profile.command)
-      return {
-        profileId: profile.id,
-        command: profile.command,
-        installed: resolvedPath !== null,
-        ...(resolvedPath ? { resolvedPath } : {}),
-      }
-    }))
+    return Promise.all(
+      this.options.getConfig().agentProfiles.map(async (profile) => {
+        const resolvedPath = await findExecutable(profile.command)
+        return {
+          profileId: profile.id,
+          command: profile.command,
+          installed: resolvedPath !== null,
+          ...(resolvedPath ? { resolvedPath } : {}),
+        }
+      }),
+    )
   }
 
   async reconcileConfig(nextConfig: AppConfig): Promise<void> {
-    const sessions = new Set(nextConfig.agentSessions.map((session) => session.id))
-    await Promise.all(this.runtime.listRunningIds().filter((id) => !sessions.has(id)).map((id) => this.stop(id)))
+    const currentConfig = this.options.getConfig()
+    const nextWorkspaces = new Map(nextConfig.agentWorkspaces.map((workspace) => [workspace.id, workspace]))
+    const currentWorkspaces = new Map(currentConfig.agentWorkspaces.map((workspace) => [workspace.id, workspace]))
+    const currentProfiles = new Map(currentConfig.agentProfiles.map((profile) => [profile.id, profile]))
+    const nextProfiles = new Map(nextConfig.agentProfiles.map((profile) => [profile.id, profile]))
+    const currentProjects = new Map(currentConfig.projects.map((project) => [project.id, project]))
+    const nextProjects = new Map(nextConfig.projects.map((project) => [project.id, project]))
+
+    const toStop = this.runtime.listRunningIds().filter((id) => {
+      const currentWorkspace = currentWorkspaces.get(id)
+      const nextWorkspace = nextWorkspaces.get(id)
+      if (!currentWorkspace || !nextWorkspace || nextWorkspace.archivedAt) return true
+
+      const currentProfile = currentProfiles.get(currentWorkspace.profileId)
+      const nextProfile = nextProfiles.get(nextWorkspace.profileId)
+      const projectPathChanged =
+        currentProjects.get(currentWorkspace.projectId)?.path !== nextProjects.get(nextWorkspace.projectId)?.path
+
+      return (
+        !currentProfile ||
+        !nextProfile ||
+        !nextProfile.enabled ||
+        projectPathChanged ||
+        currentWorkspace.projectId !== nextWorkspace.projectId ||
+        currentWorkspace.checkoutId !== nextWorkspace.checkoutId ||
+        currentWorkspace.profileId !== nextWorkspace.profileId ||
+        currentProfile.command !== nextProfile.command ||
+        currentProfile.args.join('\0') !== nextProfile.args.join('\0')
+      )
+    })
+
+    await Promise.all(toStop.map((id) => this.stop(id)))
+    for (const id of this.runtime.listIds()) {
+      if (!nextWorkspaces.has(id)) {
+        this.runtime.forget(id)
+        this.unread.delete(id)
+        this.crashed.delete(id)
+      }
+    }
   }
 
-  stopAll(): Promise<void> { return this.runtime.stopAll() }
-  killAllImmediately(): void { this.runtime.killAllImmediately() }
+  stopAll(): Promise<void> {
+    return this.runtime.stopAll()
+  }
+  killAllImmediately(): void {
+    this.runtime.killAllImmediately()
+  }
 
-  private async resolveSession(sessionId: string) {
-    const session = this.options.getConfig().agentSessions.find((item) => item.id === sessionId)
-    if (!session) return null
-    const profile = this.options.getConfig().agentProfiles.find((item) => item.id === session.profileId)
+  private async resolveWorkspace(workspaceId: string) {
+    const workspace = this.options.getConfig().agentWorkspaces.find((item) => item.id === workspaceId)
+    if (!workspace || workspace.archivedAt) return null
+    const profile = this.options.getConfig().agentProfiles.find((item) => item.id === workspace.profileId)
     if (!profile?.enabled || !profile.command) return null
-    const checkout = await this.options.resolveCheckout(session.checkoutId)
-    if (!checkout || checkout.projectId !== session.projectId) return null
-    return { session, profile, checkout }
+    const checkout = await this.options.resolveCheckout(workspace.checkoutId)
+    if (!checkout || checkout.projectId !== workspace.projectId) return null
+    return { workspace, profile, checkout }
   }
 }
 
 async function findExecutable(command: string): Promise<string | null> {
   if (!command.trim() || command.includes('\0')) return null
-  if (path.isAbsolute(command) || command.includes(path.sep)) {
+  const accessMode = process.platform === 'win32' ? constants.F_OK : constants.X_OK
+  if (path.isAbsolute(command) || /[/\\]/.test(command)) {
     try {
-      await access(command)
+      await access(command, accessMode)
       return path.resolve(command)
     } catch {
       return null
     }
   }
-  const extensions = process.platform === 'win32'
-    ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';')
-    : ['']
+  const extensions = process.platform === 'win32' ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';') : ['']
   for (const directory of (process.env.PATH ?? '').split(path.delimiter)) {
     for (const extension of extensions) {
       const candidate = path.join(directory, `${command}${extension}`)
       try {
-        await access(candidate)
+        await access(candidate, accessMode)
         return candidate
       } catch {
         // Keep searching PATH.

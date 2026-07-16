@@ -1,23 +1,34 @@
 # Exedeck
 
-Exedeck is a cross-platform Electron workspace for running and monitoring
-long-lived development commands, terminal agents, and local Git workflows.
-Projects stay organized in a native desktop shell while tasks and agents get
-interactive, buffered terminals and every Git operation stays scoped to a
-known project checkout.
+Exedeck is a cross-platform workbench for persistent CLI-agent workspaces. Each
+workspace binds one project, one Git checkout, one primary agent, and optional
+development tasks. Opening Exedeck restores the last workspace without starting
+its agent; starting processes always remains explicit.
 
 ## Highlights
 
-- Run multiple PTY-backed tasks concurrently, with explicit Start, Stop, and
-  Restart actions.
-- Preserve terminal output while switching tasks and after renderer reloads.
+- Restore the last-opened agent workspace while keeping it stopped after an app
+  restart. Terminal output remains available while switching workspaces during
+  the current app session.
+- Use the agent terminal as the center of the workbench, with a resizable Git
+  inspector and a collapsible task panel bound to the same checkout.
+- Create a workspace in the project root or create an isolated sibling
+  worktree on an editable `agent/*` branch.
+- Finish a workspace with a guarded archive/merge/remove flow. Agents and
+  checkouts must be stopped and clean; optional branch deletion is safe-only
+  and disabled by default.
+- Recover from moved or deleted worktrees by rebinding or archiving the
+  workspace instead of silently falling back to the project root.
+- Run multiple PTY-backed project tasks with explicit Start, Stop, and Restart
+  actions. Manual starts use the active workspace checkout; auto-start tasks
+  continue to use the project root.
 - Monitor CPU and memory usage for running tasks.
 - Configure projects, task arguments, working folders, and coordinated
   auto-start behavior.
 - Scaffold Laravel and AdonisJS projects with live output and safe cancellation.
-- Run Codex, Claude, and custom agent CLIs concurrently in project roots or Git
-  worktrees. Session definitions persist while terminal output remains bounded
-  runtime state.
+- Run Codex, Claude, and custom interactive agent CLIs in project roots or Git
+  worktrees. Workspace metadata persists while terminal output remains bounded
+  in-memory runtime state.
 - Inspect structured changes and patches; stage, unstage, discard, stash,
   commit, browse history, manage branches, and fetch/pull/push.
 - Create and remove worktrees, with branch-changing operations blocked while a
@@ -36,45 +47,76 @@ known project checkout.
 
 ## Requirements
 
-- A current Node.js release with npm
+- Node.js 22.12 or newer with npm
 - Platform build tools required by `node-pty`
 - A graphical session for Electron runtime and accessibility smoke tests
 
 Run `npm install` after cloning. The repository records approvals for the
-specific dependency install scripts needed to download Electron/esbuild and
-compile `node-pty`.
+dependency install scripts used by the build toolchain. The project postinstall
+step installs the pinned Electron binary and rebuilds `node-pty` for that
+runtime.
+
+Node 24 is the repository's default development and CI version (`.nvmrc`),
+matching the Node major embedded in Electron.
 
 ## Commands
 
-- `npm start` — launch the built desktop app.
+- `npm run dev` — launch Electron with renderer hot module replacement and
+  automatic restarts when main or preload code changes. Development uses an
+  isolated application-data directory so it cannot overwrite installed-app
+  settings.
+- `npm start` — build and launch a production preview of the desktop app.
+- `npm run test:watch` — rerun unit tests as files change.
+- `npm run lint` — check TypeScript, JavaScript, and Vue files with ESLint.
+- `npm run format`, `npm run format:check` — write or verify the Prettier baseline.
 - `npm run typecheck` — run TypeScript checks.
-- `npm test` — run unit tests for configuration and argument handling.
-- `npm run build` — build main, preload, and renderer bundles.
-- `npm run check` — run type checking, unit tests, and the production build.
-- `npm run smoke` — launch the built app, exercise preload + PTY output, and
-  exit automatically.
+- `npm test` — run unit and Vue component tests.
+- `npm run build` — build main, preload, and renderer bundles without launching
+  the app.
+- `npm run check` — run formatting, lint, type checking, tests, and the production build.
+- `npm run smoke` — build into an isolated temporary profile, exercise Electron,
+  preload, and PTY output, then exit automatically.
 - `npm run test:a11y` — build, launch an isolated Electron profile, and run axe
   against the workspace, settings, and delete confirmation views.
 - `npm run pack` — produce an unpacked application in `release/`.
-- `npm run dist`, `npm run dist:win`, `npm run dist:linux` — create installers.
+- `npm run dist`, `npm run dist:win`, `npm run dist:mac`, `npm run dist:linux` — create installers.
 
 The smoke commands are self-terminating and are not normal launch modes.
 
+## Releases and updates
+
+Pushing a tag matching the package version, such as `v1.0.0`, runs the release
+workflow on Linux, Windows, and macOS and publishes the platform artifacts to
+GitHub Releases. Windows and macOS jobs deliberately fail instead of publishing
+unsigned builds when their signing credentials are missing.
+
+Configure `WINDOWS_CSC_LINK` and `WINDOWS_CSC_KEY_PASSWORD` for Authenticode.
+Configure `MACOS_CSC_LINK`, `MACOS_CSC_KEY_PASSWORD`, `APPLE_API_KEY`,
+`APPLE_API_KEY_ID`, and `APPLE_API_ISSUER` for Developer ID signing and
+notarization. Store the contents of the App Store Connect `.p8` file in
+`APPLE_API_KEY`; the workflow writes it to a protected temporary file. Apple ID
+notarization credentials supported by electron-builder can be used instead of
+the API-key trio.
+
+Packaged NSIS, macOS, and AppImage installations check GitHub Releases shortly
+after startup. Updates are downloaded only after confirmation and installed on
+an explicit restart or the next quit. Linux package-manager installations stay
+under their package manager's control. Set `EXEDECK_DISABLE_UPDATES=1` to disable
+checks in managed environments.
+
 ## Keyboard access
 
-- `Ctrl/Cmd+F` focuses the project/task filter.
-- `Ctrl/Cmd+,` opens settings for the selected project.
-- `Ctrl/Cmd+1`, `2`, and `3` open Tasks, Agents, and Git.
-- `Ctrl/Cmd+N` creates a project; add Shift to clone a repository.
-- `F5`, `Shift+F5`, and `Ctrl/Cmd+Shift+F5` start, stop, and restart the
-  selected task.
+- `Ctrl/Cmd+F` focuses the project/workspace filter.
+- `Ctrl/Cmd+Shift+N` creates an agent workspace in the selected project.
+- `Ctrl/Cmd+G` toggles the Git inspector.
+- `Ctrl/Cmd+J` toggles the task panel.
 - Control + backtick, or `F6`, focuses the interactive terminal.
 - `F11` toggles full-screen mode.
 - `Escape` closes dismissible dialogs; confirmations keep focus contained.
 
-The frameless application title bar exposes File, Edit, View, Process, Window,
-and Help menus plus minimize, maximize/restore, and close controls. Privileged
-menu commands still pass through the restricted preload bridge.
+The frameless title bar exposes File, Workspace, View, and Help menus plus
+window controls. Privileged menu commands still pass through the restricted
+preload bridge.
 
 ## Configuration
 
@@ -84,13 +126,15 @@ The persisted schema contains:
 - `tasks[]` with command, argument array, inherited working directory, and
   `autoStart`.
 - `onboardingCompleted` and the schema version.
-- application preferences for appearance, editor, clone folder, and AI profile.
-- `agentProfiles[]` for built-in or custom terminal CLIs and `agentSessions[]`
-  binding each session to a project and checkout.
+- application preferences for appearance, editor, clone folder, AI profile,
+  and the last-opened workspace.
+- `agentProfiles[]` for built-in or custom terminal CLIs.
+- `agentWorkspaces[]` binding one agent to a project checkout, with optional
+  archive and provider resume metadata.
 
-Schema v4 is migrated automatically from earlier configurations. Existing
-projects and tasks keep their IDs and definitions; Codex and Claude profiles
-are added only when no profiles exist.
+Schema v5 is the active-development baseline. Exedeck normalizes the current
+configuration shape and supplies Codex and Claude profiles when no profiles
+exist; it does not promise migration compatibility with pre-release schemas.
 
 Exedeck normalizes and bounds untrusted renderer payloads in the main process.
 Writes are atomic and private to the current user where the platform supports
@@ -121,23 +165,44 @@ task stops the old process before saving the new configuration.
 
 - `electron/main.ts` — app lifecycle, frameless window commands, hardened domain IPC,
   stats, auto-start, and runtime smoke flow.
-- `electron/preload.ts` — narrow typed `projects`, `processes`, `agents`, `git`,
-  `ai`, and `window` context-bridge domains.
+- `electron/preload.ts` — narrow typed `projects`, `processes`, `agents`,
+  `workspaces`, `git`, `ai`, and `window` context-bridge domains.
 - `electron/processRuntime.ts` — shared PTY lifecycle, bounded buffers,
   restart/stop, resize/input, and shutdown behavior.
-- `electron/taskManager.ts` and `electron/agentManager.ts` — task and persisted
-  agent-session adapters over the shared process runtime.
+- `electron/processCommand.ts` — cross-platform PTY command construction and
+  Windows command-line escaping.
+- `electron/taskManager.ts` and `electron/agentManager.ts` — checkout-bound task
+  and workspace-agent adapters over the shared process runtime.
+- `electron/workspaceService.ts` — serialized create, rebind, finish, merge,
+  worktree removal, and archive coordination.
 - `electron/gitService.ts` — bounded Git command execution, parsing, checkout
   resolution, and per-project mutation locking.
 - `electron/aiService.ts` — provider boundary for editable Git text generation,
   currently implemented with Codex CLI.
 - `electron/provisioningJobManager.ts` — scaffold job lifecycle and project
   registration data.
-- `electron/config.ts` — schema normalization, migration, backup, and atomic
+- `electron/config.ts` — schema normalization, malformed-file backup, and atomic
   persistence.
+- `electron/updateService.ts` — packaged-app update checks and user-controlled
+  download/install prompts.
 - `shared/types.ts` — shared config, events, and preload contract.
 - `src/state/store.ts` — renderer state and IPC subscriptions.
-- `src/components/` — Tasks, Agents, Git, terminal, settings, onboarding,
-  clone, and scaffold UI.
+- `src/components/` — workspace navigator, agent workbench, Git inspector, task
+  panel, terminal, settings, onboarding, clone, and scaffold UI.
 - `src/composables/useDialogFocus.ts` — dialog focus containment/restoration.
 - `scripts/accessibility-smoke.mjs` — live Electron axe regression check.
+
+## Visual UI checks
+
+The Playwright suite launches the built Electron application with isolated,
+seeded user data. It covers onboarding, project, workspace, task, settings, and
+confirmation states at the default `1280x800` size and the minimum supported
+`760x560` size.
+
+```bash
+npm run test:ui
+```
+
+When an intentional UI change needs new reviewed baselines, regenerate them
+with `npm run test:ui:update`. Failure traces and screenshots are written to
+`test-results/`, and the HTML report is written to `playwright-report/`.

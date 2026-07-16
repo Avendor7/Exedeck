@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import * as pty from 'node-pty'
 import kill from 'tree-kill'
+import { resolvePtySpawnCommand } from './processCommand'
 import type {
   ProjectConfig,
   ProjectCreateDoneEvent,
@@ -57,6 +58,7 @@ function validateProjectName(name: string): string | null {
     return 'Project name must be 100 characters or fewer.'
   }
 
+  // eslint-disable-next-line no-control-regex -- control characters are intentionally rejected.
   if (/[\u0000-\u001f<>:"|?*]/.test(trimmed)) {
     return 'Project name contains characters that are not valid in file names.'
   }
@@ -155,9 +157,11 @@ export class ProvisioningJobManager {
       }
     }
 
-    void this.runProvisioning(job).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error)
-      this.finish(job, 'failed', `Unexpected scaffold error: ${message}`)
+    setImmediate(() => {
+      void this.runProvisioning(job).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error)
+        this.finish(job, 'failed', `Unexpected scaffold error: ${message}`)
+      })
     })
     return jobId
   }
@@ -213,9 +217,13 @@ export class ProvisioningJobManager {
     if (!pid) {
       return true
     }
-    await this.killTree(pid)
-    await this.waitForState(jobId, ['canceled', 'failed', 'success'], 1200)
-    return true
+    await this.killTree(pid, 'SIGTERM')
+    if (await this.waitForState(jobId, ['canceled', 'failed', 'success'], 1200)) {
+      return true
+    }
+
+    await this.killTree(pid, 'SIGKILL')
+    return this.waitForState(jobId, ['canceled', 'failed', 'success'], 500)
   }
 
   private async runProvisioning(job: ProvisioningJob): Promise<void> {
@@ -336,14 +344,8 @@ export class ProvisioningJobManager {
     let child: pty.IPty
 
     try {
-      let spawnCommand = attempt.command
-      let spawnArgs = attempt.args
-      if (process.platform === 'win32') {
-        spawnCommand = 'cmd.exe'
-        spawnArgs = ['/c', attempt.command, ...attempt.args]
-      }
-
-      child = pty.spawn(spawnCommand, spawnArgs, {
+      const spawn = resolvePtySpawnCommand(attempt.command, attempt.args)
+      child = pty.spawn(spawn.command, spawn.args, {
         name: 'xterm-256color',
         cols: 120,
         rows: 30,
@@ -409,29 +411,31 @@ export class ProvisioningJobManager {
     }
 
     const packageManager = await this.detectPackageManager(job.status.targetPath)
-    const installArgs = packageManager === 'yarn' ? [] : ['install']
-
-    const installResult = await this.runAttempt(job, {
-      command: packageManager,
-      args: installArgs,
-      cwd: job.status.targetPath,
-    })
-    if (installResult.state !== 'success') {
-      return {
-        state: installResult.state,
-        error: installResult.error ?? `${packageManager} install failed.`,
+    if (!(await this.pathExists(path.join(job.status.targetPath, 'node_modules')))) {
+      const installResult = await this.runAttempt(job, {
+        command: packageManager,
+        args: packageManager === 'yarn' ? [] : ['install'],
+        cwd: job.status.targetPath,
+      })
+      if (installResult.state !== 'success') {
+        return {
+          state: installResult.state,
+          error: installResult.error ?? `${packageManager} install failed.`,
+        }
       }
     }
 
-    const buildResult = await this.runAttempt(job, {
-      command: packageManager,
-      args: packageManager === 'yarn' ? ['build'] : ['run', 'build'],
-      cwd: job.status.targetPath,
-    })
-    if (buildResult.state !== 'success') {
-      return {
-        state: buildResult.state,
-        error: buildResult.error ?? `${packageManager} build failed.`,
+    if (await this.hasPackageScript(job.status.targetPath, 'build')) {
+      const buildResult = await this.runAttempt(job, {
+        command: packageManager,
+        args: packageManager === 'yarn' ? ['build'] : ['run', 'build'],
+        cwd: job.status.targetPath,
+      })
+      if (buildResult.state !== 'success') {
+        return {
+          state: buildResult.state,
+          error: buildResult.error ?? `${packageManager} build failed.`,
+        }
       }
     }
 
@@ -445,7 +449,11 @@ export class ProvisioningJobManager {
 
       try {
         const existing = await fs.readFile(fullPath, 'utf8')
-        const next = this.upsertEnvKey(this.upsertEnvKey(existing, 'DB_CONNECTION', 'sqlite'), 'DB_DATABASE', 'database/database.sqlite')
+        const next = this.upsertEnvKey(
+          this.upsertEnvKey(existing, 'DB_CONNECTION', 'sqlite'),
+          'DB_DATABASE',
+          'database/database.sqlite',
+        )
         if (next !== existing) {
           await fs.writeFile(fullPath, next, 'utf8')
         }
@@ -498,9 +506,7 @@ export class ProvisioningJobManager {
   }
 
   async stopAll(): Promise<void> {
-    const activeJobs = Array.from(this.jobs.values()).filter(
-      (job) => job.status.state === 'running' && job.process,
-    )
+    const activeJobs = Array.from(this.jobs.values()).filter((job) => job.status.state === 'running' && job.process)
     await Promise.all(activeJobs.map((job) => this.cancel(job.id)))
   }
 
@@ -512,6 +518,7 @@ export class ProvisioningJobManager {
 
       job.cancelRequested = true
       try {
+        kill(job.process.pid, 'SIGKILL', () => undefined)
         job.process.kill()
       } catch {
         // The operating system may already have reaped the child process.
@@ -597,6 +604,28 @@ export class ProvisioningJobManager {
       return 'yarn'
     } catch {
       return 'npm'
+    }
+  }
+
+  private async pathExists(targetPath: string): Promise<boolean> {
+    try {
+      await fs.access(targetPath)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private async hasPackageScript(projectPath: string, scriptName: string): Promise<boolean> {
+    try {
+      const packageJson = JSON.parse(await fs.readFile(path.join(projectPath, 'package.json'), 'utf8')) as unknown
+      if (!packageJson || typeof packageJson !== 'object') return false
+      const scripts = (packageJson as Record<string, unknown>).scripts
+      return Boolean(
+        scripts && typeof scripts === 'object' && typeof (scripts as Record<string, unknown>)[scriptName] === 'string',
+      )
+    } catch {
+      return false
     }
   }
 
@@ -698,9 +727,9 @@ export class ProvisioningJobManager {
     })
   }
 
-  private killTree(pid: number): Promise<void> {
+  private killTree(pid: number, signal: string): Promise<void> {
     return new Promise((resolve) => {
-      kill(pid, 'SIGTERM', () => resolve())
+      kill(pid, signal, () => resolve())
     })
   }
 }

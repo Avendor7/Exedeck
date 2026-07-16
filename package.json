@@ -1,95 +1,149 @@
 {
-    "name": "exedeck",
-    "version": "1.0.0",
-    "description": "A secure cross-platform workspace for running and monitoring development processes.",
-    "license": "ISC",
-    "author": {
-        "name": "avendor",
-        "email": "avendor@example.com"
+  "name": "exedeck",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A secure cross-platform workspace for running and monitoring development processes.",
+  "desktopName": "exedeck.desktop",
+  "license": "ISC",
+  "author": {
+    "name": "Stephen Wiggins",
+    "email": "steve.wiggins7@gmail.com"
+  },
+  "homepage": "https://github.com/Avendor7/Exedeck#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Avendor7/Exedeck.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Avendor7/Exedeck/issues"
+  },
+  "type": "module",
+  "main": "out/main/main.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "cross-env EXEDECK_DEV_USER_DATA=1 electron-vite dev --watch",
+    "start": "cross-env EXEDECK_DEV_USER_DATA=1 electron-vite preview",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "release:verify": "node scripts/verify-release.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:a11y": "npm run build && node scripts/accessibility-smoke.mjs",
+    "test:ui": "npm run build && playwright test",
+    "test:ui:update": "npm run build && playwright test --update-snapshots",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
+    "build": "electron-vite build",
+    "postinstall": "install-electron --no && electron-builder install-app-deps",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win nsis",
+    "dist:mac": "npm run build && electron-builder --mac dmg zip",
+    "dist:linux": "npm run build && electron-builder --linux AppImage deb",
+    "smoke": "npm run build && npm run smoke:built",
+    "smoke:built": "node scripts/electron-smoke.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^24.13.3",
+    "@vitejs/plugin-vue": "^6.0.4",
+    "@vue/test-utils": "^2.4.11",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "axe-core": "^4.12.1",
+    "cross-env": "^10.1.0",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "eslint": "^10.7.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.9.2",
+    "globals": "^17.7.0",
+    "happy-dom": "^20.10.6",
+    "prettier": "^3.9.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.64.0",
+    "vitest": "^4.1.10",
+    "vue": "^3.5.39",
+    "vue-tsc": "^3.3.7",
+    "ws": "^8.21.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "node-pty": "^1.1.0",
+    "pidusage": "^4.0.1",
+    "tree-kill": "^1.2.2"
+  },
+  "build": {
+    "appId": "com.exedeck.app",
+    "productName": "Exedeck",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
     },
-    "type": "module",
-    "main": "out/main/main.js",
-    "scripts": {
-        "typecheck": "tsc --noEmit",
-        "test": "vitest run",
-        "test:a11y": "npm run build && node scripts/accessibility-smoke.mjs",
-        "check": "npm run typecheck && npm test && npm run build",
-        "build": "electron-vite build",
-        "pack": "npm run build && electron-builder --dir",
-        "dist": "npm run build && electron-builder",
-        "dist:win": "npm run build && electron-builder --win nsis",
-        "dist:linux": "npm run build && electron-builder --linux AppImage deb",
-        "smoke": "cross-env SMOKE=1 electron .",
-        "start": "electron .",
-        "start:linux": "electron ."
+    "files": [
+      "out/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "build/icon.png"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "build/icon.ico"
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "icon.ico"
     },
-    "devDependencies": {
-        "@types/node": "^25.3",
-        "@vitejs/plugin-vue": "^6.0.4",
-        "axe-core": "^4.12.1",
-        "cross-env": "^10.1.0",
-        "electron": "^40.10.6",
-        "electron-builder": "^26.8.1",
-        "electron-vite": "^5.0.0",
-        "typescript": "^5.9.3",
-        "vitest": "^4.1.10",
-        "ws": "^8.21.0"
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "icon.icns",
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": true
     },
-    "dependencies": {
-        "@xterm/addon-fit": "^0.11.0",
-        "@xterm/xterm": "^6.0",
-        "node-pty": "^1.1.0",
-        "pidusage": "^4.0.1",
-        "tree-kill": "^1.2.2",
-        "vue": "^3.5"
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "icon.png",
+      "category": "Development",
+      "syncDesktopName": true,
+      "maintainer": "Stephen Wiggins <steve.wiggins7@gmail.com>"
     },
-    "build": {
-        "appId": "com.exedeck.app",
-        "productName": "Exedeck",
-        "directories": {
-            "buildResources": "build",
-            "output": "release"
-        },
-        "files": [
-            "out/**/*",
-            "node_modules/**/*",
-            "package.json"
-        ],
-        "extraResources": [
-            {
-                "from": "build/icon.png",
-                "to": "build/icon.png"
-            },
-            {
-                "from": "build/icon.ico",
-                "to": "build/icon.ico"
-            }
-        ],
-        "asar": true,
-        "asarUnpack": [
-            "**/*.node"
-        ],
-        "win": {
-            "target": [
-                "nsis"
-            ],
-            "icon": "icon.ico"
-        },
-        "linux": {
-            "target": [
-                "AppImage",
-                "deb"
-            ],
-            "icon": "icon.png",
-            "category": "Development",
-            "maintainer": "avendor <avendor@example.com>"
-        }
-    },
-    "allowScripts": {
-        "electron@40.10.6": true,
-        "esbuild@0.25.12": true,
-        "esbuild@0.28.1": true,
-        "node-pty@1.1.0": true,
-        "electron-winstaller@5.4.0": true
-    }
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Avendor7",
+        "repo": "Exedeck",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.1": true,
+    "node-pty@1.1.0": true,
+    "electron-winstaller@5.4.0": true
+  }
 }

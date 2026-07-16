@@ -22,6 +22,9 @@ let colorScheme: MediaQueryList | null = null
 let themeObserver: MutationObserver | null = null
 let renderedBuffer = ''
 let renderedTaskId = ''
+let notifiedTaskId = ''
+let notifiedCols = 0
+let notifiedRows = 0
 
 function renderFullBuffer(): void {
   if (!terminal) {
@@ -57,10 +60,17 @@ function fitTerminalAndNotify(): void {
   } catch {
     return
   }
-  emit('resize', {
-    cols: terminal.cols,
-    rows: terminal.rows,
-  })
+  notifyTerminalSize(terminal.cols, terminal.rows)
+}
+
+function notifyTerminalSize(cols: number, rows: number): void {
+  if (props.taskId === notifiedTaskId && cols === notifiedCols && rows === notifiedRows) {
+    return
+  }
+  notifiedTaskId = props.taskId
+  notifiedCols = cols
+  notifiedRows = rows
+  emit('resize', { cols, rows })
 }
 
 function applyTerminalTheme(): void {
@@ -141,7 +151,7 @@ onMounted(async () => {
   })
 
   terminal.onResize(({ cols, rows }) => {
-    emit('resize', { cols, rows })
+    notifyTerminalSize(cols, rows)
   })
 
   containerRef.value.addEventListener('click', focusTerminal)
@@ -158,6 +168,7 @@ watch(
   () => props.taskId,
   () => {
     renderFullBuffer()
+    if (terminal) notifyTerminalSize(terminal.cols, terminal.rows)
   },
 )
 

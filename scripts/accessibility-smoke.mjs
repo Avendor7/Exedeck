@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -27,7 +27,7 @@ const debugPort = await new Promise((resolve, reject) => {
 await writeFile(
   path.join(userDataDir, 'exedeck.config.json'),
   JSON.stringify({
-    schemaVersion: 3,
+    schemaVersion: 5,
     onboardingCompleted: true,
     projects: [
       {
@@ -48,6 +48,7 @@ await writeFile(
         ],
       },
     ],
+    agentWorkspaces: [],
   }),
   'utf8',
 )
@@ -117,10 +118,7 @@ async function waitFor(expression) {
 
 async function runAxe(label) {
   const result = JSON.parse(
-    await evaluate(
-      'axe.run(document, { resultTypes: ["violations"] }).then((result) => JSON.stringify(result))',
-      true,
-    ),
+    await evaluate('axe.run(document, { resultTypes: ["violations"] }).then((result) => JSON.stringify(result))', true),
   )
   if (result.violations.length > 0) {
     const summary = result.violations.map((violation) => ({
@@ -155,7 +153,7 @@ try {
   await evaluate(axeSource)
 
   await runAxe('workspace')
-  await evaluate('document.querySelector(".project-settings").click()')
+  await evaluate('document.querySelector(".workspace-project-row .icon-button").click()')
   await waitFor('document.querySelector("[aria-labelledby=settings-title]")')
   await runAxe('settings')
   await evaluate('document.querySelector(".subtle-danger").click()')
@@ -168,4 +166,5 @@ try {
     new Promise((resolve) => child.once('exit', resolve)),
     delay(3000).then(() => child.kill('SIGKILL')),
   ])
+  await rm(userDataDir, { recursive: true, force: true })
 }

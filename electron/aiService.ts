@@ -9,11 +9,13 @@ export class AiService {
   ) {}
 
   async generateCommitMessage(checkoutId: string): Promise<AiCommitMessage> {
+    const checkout = await this.git.resolveCheckout(checkoutId)
+    if (!checkout) throw new Error('The selected checkout no longer exists.')
     const diff = await this.git.stagedDiff(checkoutId)
     if (!diff.trim()) throw new Error('Stage changes before generating a commit message.')
     const config = this.getConfig()
     const profile = config.agentProfiles.find((item) => item.id === config.preferences.aiProfileId)
-    if (!profile || profile.tool !== 'codex' || !profile.command) {
+    if (!profile?.enabled || profile.tool !== 'codex' || !profile.command) {
       throw new Error('Select an enabled Codex profile in settings for AI Git suggestions.')
     }
     const prompt = [
@@ -23,22 +25,34 @@ export class AiService {
       '',
       diff,
     ].join('\n')
-    const output = await runCodex(profile.command, [...profile.args, 'exec', '-'], prompt)
+    const output = await runCodex(
+      profile.command,
+      [...profile.args, 'exec', '--ephemeral', '--sandbox', 'read-only', '-'],
+      prompt,
+      checkout.path,
+    )
     const [summary = '', ...rest] = output.trim().split('\n')
     if (!summary.trim()) throw new Error('The AI provider returned an empty commit message.')
     return { summary: summary.trim().slice(0, 200), description: rest.join('\n').trim().slice(0, 10_000) }
   }
 }
 
-function runCodex(command: string, args: string[], input: string): Promise<string> {
+function runCodex(command: string, args: string[], input: string, cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(command, args, { cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     const timer = setTimeout(() => child.kill('SIGTERM'), 120_000)
-    child.stdout.on('data', (chunk: Buffer) => { stdout = (stdout + chunk.toString('utf8')).slice(-200_000) })
-    child.stderr.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString('utf8')).slice(-20_000) })
-    child.on('error', (error) => { clearTimeout(timer); reject(error) })
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout = (stdout + chunk.toString('utf8')).slice(-200_000)
+    })
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString('utf8')).slice(-20_000)
+    })
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
     child.on('close', (code) => {
       clearTimeout(timer)
       if (code === 0) resolve(stdout)

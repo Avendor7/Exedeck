@@ -2,33 +2,30 @@ import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import {
-  CONFIG_SCHEMA_VERSION,
-  createDefaultConfig,
-  loadOrCreateConfig,
-  normalizeConfig,
-  saveConfig,
-} from './config'
+import { CONFIG_SCHEMA_VERSION, createDefaultConfig, loadOrCreateConfig, normalizeConfig, saveConfig } from './config'
 
 describe('configuration persistence', () => {
   it('normalizes paths, duplicate IDs, and task working directories', () => {
     const root = path.resolve('/tmp/exedeck-root')
-    const normalized = normalizeConfig({
-      projects: [
-        {
-          id: 'same',
-          name: ' First ',
-          path: '.',
-          tasks: [{ id: 'task', name: 'Dev', command: 'npm', args: ['run', 'dev'] }],
-        },
-        {
-          id: 'same',
-          name: 'Second',
-          path: root,
-          tasks: [{ id: 'task', name: 'Worker', command: 'node' }],
-        },
-      ],
-    }, root)
+    const normalized = normalizeConfig(
+      {
+        projects: [
+          {
+            id: 'same',
+            name: ' First ',
+            path: '.',
+            tasks: [{ id: 'task', name: 'Dev', command: 'npm', args: ['run', 'dev'] }],
+          },
+          {
+            id: 'same',
+            name: 'Second',
+            path: root,
+            tasks: [{ id: 'task', name: 'Worker', command: 'node' }],
+          },
+        ],
+      },
+      root,
+    )
 
     expect(normalized.schemaVersion).toBe(CONFIG_SCHEMA_VERSION)
     expect(normalized.projects[0].path).toBe(root)
@@ -44,13 +41,13 @@ describe('configuration persistence', () => {
     const loaded = await loadOrCreateConfig(directory, directory)
     const files = await readdir(directory)
 
-    expect(loaded).toEqual(createDefaultConfig(directory))
+    expect(loaded).toEqual(createDefaultConfig())
     expect(files.some((file) => file.startsWith('exedeck.config.json.invalid-'))).toBe(true)
   })
 
   it('writes complete JSON that can be read back', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'exedeck-config-'))
-    const config = createDefaultConfig(directory)
+    const config = createDefaultConfig()
     await saveConfig(directory, config)
 
     const stored = JSON.parse(await readFile(path.join(directory, 'exedeck.config.json'), 'utf8'))
@@ -58,23 +55,53 @@ describe('configuration persistence', () => {
     expect((await readdir(directory)).some((file) => file.endsWith('.tmp'))).toBe(false)
   })
 
-  it('migrates schema v3 projects and tasks to v4 without losing them', () => {
+  it('normalizes development configuration to the current schema', () => {
     const root = path.resolve('/tmp/exedeck-migration')
-    const migrated = normalizeConfig({
-      schemaVersion: 3,
-      onboardingCompleted: true,
-      projects: [{
-        id: 'project-existing',
-        name: 'Existing project',
-        path: root,
-        tasks: [{ id: 'task-existing', name: 'Dev', command: 'npm', args: ['run', 'dev'] }],
-      }],
-    }, root)
+    const migrated = normalizeConfig(
+      {
+        schemaVersion: 3,
+        onboardingCompleted: true,
+        projects: [
+          {
+            id: 'project-existing',
+            name: 'Existing project',
+            path: root,
+            tasks: [{ id: 'task-existing', name: 'Dev', command: 'npm', args: ['run', 'dev'] }],
+          },
+        ],
+      },
+      root,
+    )
 
-    expect(migrated.schemaVersion).toBe(4)
+    expect(migrated.schemaVersion).toBe(5)
     expect(migrated.projects[0].id).toBe('project-existing')
     expect(migrated.projects[0].tasks[0].id).toBe('task-existing')
     expect(migrated.agentProfiles.map((profile) => profile.tool)).toEqual(['codex', 'claude'])
     expect(migrated.preferences.appearance).toBe('system')
+    expect(migrated.agentWorkspaces).toEqual([])
+  })
+
+  it('preserves quoted arguments from legacy string configuration', () => {
+    const root = path.resolve('/tmp/exedeck-args-migration')
+    const migrated = normalizeConfig(
+      {
+        projects: [
+          {
+            id: 'project-existing',
+            path: root,
+            tasks: [
+              {
+                id: 'task-existing',
+                command: 'node',
+                args: '--title "hello world" ""',
+              },
+            ],
+          },
+        ],
+      },
+      root,
+    )
+
+    expect(migrated.projects[0].tasks[0].args).toEqual(['--title', 'hello world', ''])
   })
 })

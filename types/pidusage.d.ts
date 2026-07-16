@@ -11,6 +11,7 @@ declare module 'pidusage' {
 
   interface PidUsageFn {
     (pid: number): Promise<Status>
+    (pids: number[]): Promise<Record<number, Status>>
     clear: () => void
   }
 

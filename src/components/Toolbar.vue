@@ -28,7 +28,13 @@ const emit = defineEmits<{
       Restart
     </button>
     <span class="toolbar-separator" aria-hidden="true" />
-    <button type="button" class="toolbar-button" :disabled="disabled" title="Focus terminal (Ctrl+`)" @click="emit('focus')">
+    <button
+      type="button"
+      class="toolbar-button"
+      :disabled="disabled"
+      title="Focus terminal (Ctrl+`)"
+      @click="emit('focus')"
+    >
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 6 4 4-4 4m6 0h6" /></svg>
       Focus
     </button>

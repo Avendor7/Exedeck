@@ -13,10 +13,7 @@ describe('command argument helpers', () => {
   })
 
   it('preserves empty arguments and Windows-style paths', () => {
-    expect(parseArgs('"" "C:\\Program Files\\Example"')).toEqual([
-      '',
-      'C:\\Program Files\\Example',
-    ])
+    expect(parseArgs('"" "C:\\Program Files\\Example"')).toEqual(['', 'C:\\Program Files\\Example'])
   })
 
   it('round trips arbitrary argument arrays', () => {

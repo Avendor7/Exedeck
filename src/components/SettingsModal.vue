@@ -28,7 +28,7 @@ interface DraftConfig {
   projects: DraftProject[]
   preferences: AppConfig['preferences']
   agentProfiles: AppConfig['agentProfiles']
-  agentSessions: AppConfig['agentSessions']
+  agentWorkspaces: AppConfig['agentWorkspaces']
 }
 
 const props = defineProps<{
@@ -71,7 +71,7 @@ function toDraftConfig(config: AppConfig): DraftConfig {
     projects: config.projects.map(toDraftProject),
     preferences: { ...config.preferences },
     agentProfiles: config.agentProfiles.map((profile) => ({ ...profile, args: [...profile.args] })),
-    agentSessions: config.agentSessions.map((session) => ({ ...session })),
+    agentWorkspaces: config.agentWorkspaces.map((workspace) => ({ ...workspace })),
   }
 }
 
@@ -84,7 +84,8 @@ const confirmCancelRef = ref<HTMLButtonElement | null>(null)
 useDialogFocus(dialogRef, () => emit('close'))
 
 const currentProject = computed<DraftProject | null>(
-  () => draft.value.projects.find((project) => project.id === editingProjectId.value) ?? draft.value.projects[0] ?? null,
+  () =>
+    draft.value.projects.find((project) => project.id === editingProjectId.value) ?? draft.value.projects[0] ?? null,
 )
 
 const pendingProjectRemoval = computed<DraftProject | null>(() => {
@@ -94,6 +95,8 @@ const pendingProjectRemoval = computed<DraftProject | null>(() => {
 
   return draft.value.projects.find((project) => project.id === pendingProjectRemovalId.value) ?? null
 })
+
+const canSave = computed(() => draft.value.projects.every((project) => project.path.trim()))
 
 function createDraftTask(): DraftTask {
   return {
@@ -109,7 +112,7 @@ function addProject(): void {
   const next: DraftProject = {
     id: createId('project'),
     name: `Project ${draft.value.projects.length + 1}`,
-    path: '.',
+    path: '',
     framework: 'custom',
     autoStart: false,
     tasks: [createDraftTask()],
@@ -166,7 +169,7 @@ function addAgentProfile(): void {
 }
 
 function removeAgentProfile(profileId: string): void {
-  if (draft.value.agentSessions.some((session) => session.profileId === profileId)) {
+  if (draft.value.agentWorkspaces.some((workspace) => workspace.profileId === profileId)) {
     return
   }
   draft.value.agentProfiles = draft.value.agentProfiles.filter((profile) => profile.id !== profileId)
@@ -202,7 +205,7 @@ function saveDraft(): void {
     framework: project.framework ?? 'custom',
     autoStart: project.autoStart,
     tasks: project.tasks
-      .filter((task) => task.name.trim() || task.command.trim())
+      .filter((task) => task.command.trim())
       .map((task) => ({
         id: task.id,
         name: task.name.trim() || 'Task',
@@ -220,7 +223,7 @@ function saveDraft(): void {
     projects: nextProjects,
     preferences: { ...draft.value.preferences },
     agentProfiles: draft.value.agentProfiles.map((profile) => ({ ...profile, args: [...profile.args] })),
-    agentSessions: draft.value.agentSessions.map((session) => ({ ...session })),
+    agentWorkspaces: draft.value.agentWorkspaces.map((workspace) => ({ ...workspace })),
   }
 
   const nextSelectedProjectId =
@@ -258,7 +261,7 @@ function saveDraft(): void {
             Delete Project
           </button>
           <button type="button" class="secondary" @click="emit('close')">Cancel</button>
-          <button type="button" class="primary" @click="saveDraft">Save</button>
+          <button type="button" class="primary" :disabled="!canSave" @click="saveDraft">Save</button>
         </div>
       </header>
 
@@ -284,7 +287,7 @@ function saveDraft(): void {
           </div>
         </aside>
 
-        <section class="settings-editor" v-if="currentProject">
+        <section v-if="currentProject" class="settings-editor">
           <div class="task-editor-head">
             <h3>Application</h3>
           </div>
@@ -308,7 +311,9 @@ function saveDraft(): void {
             <label>
               <span>AI Git profile</span>
               <select v-model="draft.preferences.aiProfileId">
-                <option v-for="profile in draft.agentProfiles" :key="profile.id" :value="profile.id">{{ profile.name }}</option>
+                <option v-for="profile in draft.agentProfiles" :key="profile.id" :value="profile.id">
+                  {{ profile.name }}
+                </option>
               </select>
             </label>
           </div>
@@ -322,10 +327,26 @@ function saveDraft(): void {
               <div class="task-grid">
                 <label><span>Name</span><input v-model="profile.name" type="text" /></label>
                 <label><span>Command</span><input v-model="profile.command" type="text" /></label>
-                <label><span>Arguments</span><input :value="formatArgs(profile.args)" type="text" @input="profile.args = parseArgs(($event.target as HTMLInputElement).value)" /></label>
-                <label class="inline-checkbox"><input v-model="profile.enabled" type="checkbox" /><span>Enabled</span></label>
+                <label
+                  ><span>Arguments</span
+                  ><input
+                    :value="formatArgs(profile.args)"
+                    type="text"
+                    @input="profile.args = parseArgs(($event.target as HTMLInputElement).value)"
+                /></label>
+                <label class="inline-checkbox"
+                  ><input v-model="profile.enabled" type="checkbox" /><span>Enabled</span></label
+                >
               </div>
-              <button v-if="profile.tool === 'custom'" type="button" class="danger small" :disabled="draft.agentSessions.some((session) => session.profileId === profile.id)" @click="removeAgentProfile(profile.id)">Remove</button>
+              <button
+                v-if="profile.tool === 'custom'"
+                type="button"
+                class="danger small"
+                :disabled="draft.agentWorkspaces.some((workspace) => workspace.profileId === profile.id)"
+                @click="removeAgentProfile(profile.id)"
+              >
+                Remove
+              </button>
             </article>
           </div>
 
@@ -355,7 +376,7 @@ function saveDraft(): void {
           </div>
 
           <div class="task-editor-list">
-            <article class="task-card" v-for="task in currentProject.tasks" :key="task.id">
+            <article v-for="task in currentProject.tasks" :key="task.id" class="task-card">
               <div class="task-card-head">
                 <strong>{{ task.name || 'Task' }}</strong>
                 <button type="button" class="danger small" @click="removeTask(task.id)">Remove</button>
@@ -390,21 +411,17 @@ function saveDraft(): void {
           </div>
         </section>
 
-        <section class="settings-editor" v-else>
+        <section v-else class="settings-editor">
           <p class="empty-note">Add a project to begin configuring commands.</p>
         </section>
       </div>
 
-      <div
-        v-if="pendingProjectRemoval"
-        class="confirm-overlay"
-        @keydown.esc.stop.prevent="cancelProjectRemoval"
-      >
+      <div v-if="pendingProjectRemoval" class="confirm-overlay" @keydown.esc.stop.prevent="cancelProjectRemoval">
         <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-project-title">
           <h2 id="delete-project-title">Delete project?</h2>
           <p>
-            This will remove <strong>{{ pendingProjectRemoval.name || 'Untitled project' }}</strong> and all of its tasks from
-            this configuration.
+            This will remove <strong>{{ pendingProjectRemoval.name || 'Untitled project' }}</strong> and all of its
+            tasks from this configuration.
           </p>
           <div class="confirm-actions">
             <button ref="confirmCancelRef" type="button" class="secondary" @click="cancelProjectRemoval">Cancel</button>

@@ -10,6 +10,8 @@ release/
 .vite/
 .cache/
 *.tsbuildinfo
+playwright-report/
+test-results/
 
 # Environment files
 .env

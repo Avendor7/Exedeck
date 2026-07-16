@@ -1,203 +1,167 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import type { ExternalOpenTarget, WindowCommand, WindowState } from '../../shared/types'
-
-type WorkspaceKind = 'tasks' | 'agents' | 'git'
-type MenuId = 'file' | 'edit' | 'view' | 'process' | 'window' | 'help'
-type ActionId =
-  | 'newProject' | 'cloneProject' | 'settings' | 'openFiles' | 'openEditor' | 'openTerminal'
-  | 'tasks' | 'agents' | 'git' | 'start' | 'stop' | 'restart' | 'focus' | 'clear'
-  | 'about' | WindowCommand
-
-interface MenuEntry {
-  label?: string
-  shortcut?: string
-  action?: ActionId
-  separator?: boolean
-  disabled?: boolean
-}
 
 const props = defineProps<{
   projectName: string
   hasProject: boolean
-  workspace: WorkspaceKind
-  hasTask: boolean
-  taskRunning: boolean
+  hasWorkspace: boolean
+  agentRunning: boolean
+  gitOpen: boolean
+  taskPanelOpen: boolean
 }>()
-
 const emit = defineEmits<{
   newProject: []
   cloneProject: []
+  newWorkspace: []
+  finishWorkspace: []
   settings: []
-  selectWorkspace: [workspace: WorkspaceKind]
-  start: []
-  stop: []
-  restart: []
-  focus: []
-  clear: []
+  startAgent: []
+  stopAgent: []
+  toggleGit: []
+  toggleTasks: []
   openProject: [target: ExternalOpenTarget]
 }>()
-
-const rootRef = ref<HTMLElement | null>(null)
-const openMenu = ref<MenuId | null>(null)
+const openMenu = ref<string | null>(null)
 const windowState = ref<WindowState>({ maximized: false, fullscreen: false })
-let disposeState: (() => void) | null = null
+let dispose: (() => void) | undefined
 
-const menus = computed<Record<MenuId, MenuEntry[]>>(() => ({
-  file: [
-    { label: 'New project…', shortcut: 'Ctrl+N', action: 'newProject' },
-    { label: 'Clone repository…', shortcut: 'Ctrl+Shift+N', action: 'cloneProject' },
-    { separator: true },
-    { label: 'Project settings…', shortcut: 'Ctrl+,', action: 'settings', disabled: !props.hasProject },
-    { label: 'Open project folder', action: 'openFiles', disabled: !props.hasProject },
-    { label: 'Open in editor', action: 'openEditor', disabled: !props.hasProject },
-    { label: 'Open in terminal', action: 'openTerminal', disabled: !props.hasProject },
-    { separator: true },
-    { label: 'Quit Exedeck', shortcut: 'Ctrl+Q', action: 'quit' },
-  ],
-  edit: [
-    { label: 'Undo', shortcut: 'Ctrl+Z', action: 'undo' },
-    { label: 'Redo', shortcut: 'Ctrl+Shift+Z', action: 'redo' },
-    { separator: true },
-    { label: 'Cut', shortcut: 'Ctrl+X', action: 'cut' },
-    { label: 'Copy', shortcut: 'Ctrl+C', action: 'copy' },
-    { label: 'Paste', shortcut: 'Ctrl+V', action: 'paste' },
-    { label: 'Select all', shortcut: 'Ctrl+A', action: 'selectAll' },
-  ],
-  view: [
-    { label: 'Tasks', shortcut: 'Ctrl+1', action: 'tasks', disabled: !props.hasProject },
-    { label: 'Agents', shortcut: 'Ctrl+2', action: 'agents', disabled: !props.hasProject },
-    { label: 'Git', shortcut: 'Ctrl+3', action: 'git', disabled: !props.hasProject },
-    { separator: true },
-    { label: 'Focus task terminal', shortcut: 'Ctrl+`', action: 'focus', disabled: props.workspace !== 'tasks' || !props.hasTask },
-    { separator: true },
-    { label: 'Zoom in', shortcut: 'Ctrl++', action: 'zoomIn' },
-    { label: 'Zoom out', shortcut: 'Ctrl+-', action: 'zoomOut' },
-    { label: 'Actual size', shortcut: 'Ctrl+0', action: 'resetZoom' },
-    { label: windowState.value.fullscreen ? 'Exit full screen' : 'Enter full screen', shortcut: 'F11', action: 'toggleFullscreen' },
-    { separator: true },
-    { label: 'Reload interface', shortcut: 'Ctrl+R', action: 'reload' },
-  ],
-  process: [
-    { label: 'Start selected task', shortcut: 'F5', action: 'start', disabled: !props.hasTask || props.taskRunning },
-    { label: 'Stop selected task', shortcut: 'Shift+F5', action: 'stop', disabled: !props.hasTask || !props.taskRunning },
-    { label: 'Restart selected task', shortcut: 'Ctrl+Shift+F5', action: 'restart', disabled: !props.hasTask },
-    { separator: true },
-    { label: 'Clear task output', action: 'clear', disabled: !props.hasTask },
-  ],
-  window: [
-    { label: 'Minimize', action: 'minimize' },
-    { label: windowState.value.maximized ? 'Restore' : 'Maximize', action: 'maximize' },
-    { label: windowState.value.fullscreen ? 'Exit full screen' : 'Enter full screen', shortcut: 'F11', action: 'toggleFullscreen' },
-    { separator: true },
-    { label: 'Close window', shortcut: 'Alt+F4', action: 'close' },
-  ],
-  help: [
-    { label: 'About Exedeck', action: 'about' },
-  ],
-}))
-
-const menuLabels: Array<{ id: MenuId; label: string }> = [
-  { id: 'file', label: 'File' },
-  { id: 'edit', label: 'Edit' },
-  { id: 'view', label: 'View' },
-  { id: 'process', label: 'Process' },
-  { id: 'window', label: 'Window' },
-  { id: 'help', label: 'Help' },
-]
-
-function toggleMenu(id: MenuId): void {
-  openMenu.value = openMenu.value === id ? null : id
-}
-
-async function runAction(action?: ActionId): Promise<void> {
-  if (!action) return
+async function command(value: WindowCommand): Promise<void> {
   openMenu.value = null
-  if (action === 'newProject') return emit('newProject')
-  if (action === 'cloneProject') return emit('cloneProject')
-  if (action === 'settings') return emit('settings')
-  if (action === 'tasks' || action === 'agents' || action === 'git') return emit('selectWorkspace', action)
-  if (action === 'start') return emit('start')
-  if (action === 'stop') return emit('stop')
-  if (action === 'restart') return emit('restart')
-  if (action === 'focus') return emit('focus')
-  if (action === 'clear') return emit('clear')
-  if (action === 'openFiles') return emit('openProject', 'files')
-  if (action === 'openEditor') return emit('openProject', 'editor')
-  if (action === 'openTerminal') return emit('openProject', 'terminal')
-  if (action === 'about') return void window.exedeck.window.showAbout()
-  await window.exedeck.window.command(action)
+  await window.exedeck.window.command(value)
 }
-
-function onDocumentPointerDown(event: PointerEvent): void {
-  if (!rootRef.value?.contains(event.target as Node)) openMenu.value = null
+function action(callback: () => void): void {
+  openMenu.value = null
+  callback()
 }
-
+function showAbout(): void {
+  openMenu.value = null
+  void window.exedeck.window.showAbout()
+}
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && openMenu.value) {
-    event.preventDefault()
-    openMenu.value = null
-    return
-  }
   const modifier = event.ctrlKey || event.metaKey
-  const key = event.key.toLowerCase()
-  if (event.altKey && !modifier) {
-    const menu = menuLabels.find((item) => item.label[0].toLowerCase() === key)
-    if (menu) { event.preventDefault(); openMenu.value = menu.id; return }
-  }
-  if (modifier && key === 'n') { event.preventDefault(); event.shiftKey ? emit('cloneProject') : emit('newProject'); return }
-  if (modifier && key === 'q') { event.preventDefault(); void runAction('quit'); return }
-  if (modifier && key === 'r') { event.preventDefault(); void runAction('reload'); return }
-  if (modifier && key === '0') { event.preventDefault(); void runAction('resetZoom'); return }
-  if (modifier && (key === '+' || key === '=')) { event.preventDefault(); void runAction('zoomIn'); return }
-  if (modifier && key === '-') { event.preventDefault(); void runAction('zoomOut'); return }
-  if (modifier && ['1', '2', '3'].includes(key) && props.hasProject) {
+  if (modifier && event.shiftKey && event.key.toLowerCase() === 'n' && props.hasProject) {
     event.preventDefault()
-    emit('selectWorkspace', key === '1' ? 'tasks' : key === '2' ? 'agents' : 'git')
-    return
+    emit('newWorkspace')
   }
-  if (event.key === 'F11') { event.preventDefault(); void runAction('toggleFullscreen'); return }
-  if (event.key === 'F5' && props.hasTask) {
+  if (modifier && event.key.toLowerCase() === 'j') {
     event.preventDefault()
-    if (event.ctrlKey && event.shiftKey) emit('restart')
-    else if (event.shiftKey && props.taskRunning) emit('stop')
-    else if (!props.taskRunning) emit('start')
+    emit('toggleTasks')
   }
+  if (modifier && event.key.toLowerCase() === 'g') {
+    event.preventDefault()
+    emit('toggleGit')
+  }
+  if (event.key === 'Escape') openMenu.value = null
 }
-
 onMounted(async () => {
   windowState.value = await window.exedeck.window.getState()
-  disposeState = window.exedeck.window.onState((state) => { windowState.value = state })
-  document.addEventListener('pointerdown', onDocumentPointerDown)
+  dispose = window.exedeck.window.onState((state) => {
+    windowState.value = state
+  })
   window.addEventListener('keydown', onKeydown)
 })
-
 onBeforeUnmount(() => {
-  disposeState?.()
-  document.removeEventListener('pointerdown', onDocumentPointerDown)
+  dispose?.()
   window.removeEventListener('keydown', onKeydown)
 })
 </script>
 
 <template>
-  <div ref="rootRef" class="app-menu-bar" role="region" aria-label="Application title bar" @dblclick.self="runAction('maximize')">
-    <div class="titlebar-brand" aria-label="Exedeck" @dblclick="runAction('maximize')"><span class="titlebar-mark">E</span><strong>Exedeck</strong></div>
-    <nav class="app-menubar" role="menubar" aria-label="Application menu">
-      <div v-for="menu in menuLabels" :key="menu.id" class="app-menu-group">
-        <button type="button" role="menuitem" :aria-expanded="openMenu === menu.id" :class="{ active: openMenu === menu.id }" @click="toggleMenu(menu.id)" @mouseenter="openMenu && (openMenu = menu.id)">{{ menu.label }}</button>
-        <div v-if="openMenu === menu.id" class="app-menu-popover" role="menu" @keydown.esc.stop.prevent="openMenu = null">
-          <template v-for="(entry, index) in menus[menu.id]" :key="`${menu.id}-${index}`">
-            <div v-if="entry.separator" class="app-menu-separator" role="separator" />
-            <button v-else type="button" role="menuitem" :disabled="entry.disabled" @click="runAction(entry.action)"><span>{{ entry.label }}</span><kbd v-if="entry.shortcut">{{ entry.shortcut }}</kbd></button>
-          </template>
+  <div class="app-menu-bar" role="region" aria-label="Application title bar">
+    <div class="titlebar-brand" aria-label="Exedeck"><span class="titlebar-mark">E</span></div>
+    <nav class="app-menubar" aria-label="Application menu">
+      <div class="app-menu-group">
+        <button
+          type="button"
+          :class="{ active: openMenu === 'file' }"
+          @click="openMenu = openMenu === 'file' ? null : 'file'"
+        >
+          File
+        </button>
+        <div v-if="openMenu === 'file'" class="app-menu-popover">
+          <button :disabled="!hasProject" @click="action(() => emit('newWorkspace'))">
+            <span>New Agent Workspace</span><kbd>Ctrl+Shift+N</kbd>
+          </button>
+          <button @click="action(() => emit('newProject'))">New Application</button>
+          <button @click="action(() => emit('cloneProject'))">Clone Repository</button>
+          <div class="app-menu-separator" />
+          <button :disabled="!hasProject" @click="action(() => emit('settings'))">Project Settings</button>
+          <button @click="command('quit')">Quit</button>
         </div>
       </div>
+      <div class="app-menu-group">
+        <button
+          type="button"
+          :class="{ active: openMenu === 'workspace' }"
+          @click="openMenu = openMenu === 'workspace' ? null : 'workspace'"
+        >
+          Workspace
+        </button>
+        <div v-if="openMenu === 'workspace'" class="app-menu-popover">
+          <button :disabled="!hasWorkspace || agentRunning" @click="action(() => emit('startAgent'))">
+            Start Agent
+          </button>
+          <button :disabled="!agentRunning" @click="action(() => emit('stopAgent'))">Stop Agent</button>
+          <button :disabled="!hasWorkspace" @click="action(() => emit('finishWorkspace'))">Finish Workspace…</button>
+          <div class="app-menu-separator" />
+          <button :disabled="!hasProject" @click="action(() => emit('openProject', 'editor'))">Open in Editor</button>
+          <button :disabled="!hasProject" @click="action(() => emit('openProject', 'terminal'))">Open Terminal</button>
+          <button :disabled="!hasProject" @click="action(() => emit('openProject', 'files'))">Open Files</button>
+        </div>
+      </div>
+      <div class="app-menu-group">
+        <button
+          type="button"
+          :class="{ active: openMenu === 'view' }"
+          @click="openMenu = openMenu === 'view' ? null : 'view'"
+        >
+          View
+        </button>
+        <div v-if="openMenu === 'view'" class="app-menu-popover">
+          <button @click="action(() => emit('toggleGit'))">
+            <span>{{ gitOpen ? 'Hide' : 'Show' }} Git Inspector</span><kbd>Ctrl+G</kbd>
+          </button>
+          <button @click="action(() => emit('toggleTasks'))">
+            <span>{{ taskPanelOpen ? 'Hide' : 'Show' }} Task Panel</span><kbd>Ctrl+J</kbd>
+          </button>
+          <div class="app-menu-separator" />
+          <button @click="command('zoomIn')">Zoom In</button><button @click="command('zoomOut')">Zoom Out</button
+          ><button @click="command('resetZoom')">Actual Size</button>
+        </div>
+      </div>
+      <div class="app-menu-group">
+        <button
+          type="button"
+          :class="{ active: openMenu === 'help' }"
+          @click="openMenu = openMenu === 'help' ? null : 'help'"
+        >
+          Help
+        </button>
+        <div v-if="openMenu === 'help'" class="app-menu-popover"><button @click="showAbout">About Exedeck</button></div>
+      </div>
     </nav>
-    <div class="titlebar-context" :title="projectName" @dblclick="runAction('maximize')">{{ projectName || 'No project' }}</div>
-    <div class="window-controls" aria-label="Window controls">
-      <button type="button" aria-label="Minimize" title="Minimize" @click="runAction('minimize')"><svg viewBox="0 0 14 14"><path d="M2.5 7h9" /></svg></button>
-      <button type="button" :aria-label="windowState.maximized ? 'Restore' : 'Maximize'" :title="windowState.maximized ? 'Restore' : 'Maximize'" @click="runAction('maximize')"><svg viewBox="0 0 14 14"><path v-if="windowState.maximized" d="M4.5 5V2.5h7v7H9M2.5 4.5h7v7h-7z"/><rect v-else x="2.5" y="2.5" width="9" height="9" /></svg></button>
-      <button type="button" class="window-close" aria-label="Close" title="Close" @click="runAction('close')"><svg viewBox="0 0 14 14"><path d="m2.75 2.75 8.5 8.5m0-8.5-8.5 8.5" /></svg></button>
+    <div class="titlebar-context">{{ projectName || 'No project' }}</div>
+    <div class="window-controls">
+      <button type="button" aria-label="Minimize" @click="command('minimize')">
+        <svg aria-hidden="true" viewBox="0 0 16 16">
+          <path d="M3 8.5h10" />
+        </svg>
+      </button>
+      <button type="button" :aria-label="windowState.maximized ? 'Restore' : 'Maximize'" @click="command('maximize')">
+        <svg v-if="windowState.maximized" aria-hidden="true" viewBox="0 0 16 16">
+          <path d="M5 5V3h8v8h-2" />
+          <rect x="3" y="5" width="8" height="8" />
+        </svg>
+        <svg v-else aria-hidden="true" viewBox="0 0 16 16">
+          <rect x="3" y="3" width="10" height="10" />
+        </svg>
+      </button>
+      <button type="button" class="window-close" aria-label="Close" @click="command('close')">
+        <svg aria-hidden="true" viewBox="0 0 16 16">
+          <path d="m3 3 10 10m0-10L3 13" />
+        </svg>
+      </button>
     </div>
   </div>
 </template>

@@ -157,4 +157,3 @@ Implement this first:
 4. Minimal UI for "Create Project in Background" with live logs/status
 
 Then add detection/templates as step two.
-

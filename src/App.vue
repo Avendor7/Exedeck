@@ -1,428 +1,453 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { AppConfig, Checkout, ExternalOpenTarget } from '../shared/types'
+import { useStore } from './state/store'
+import AgentWorkspace from './components/AgentWorkspace.vue'
+import AppMenuBar from './components/AppMenuBar.vue'
+import CloneRepositoryModal from './components/CloneRepositoryModal.vue'
+import GitWorkspace from './components/GitWorkspace.vue'
 import NewProjectWizard from './components/NewProjectWizard.vue'
 import OnboardingWizard from './components/OnboardingWizard.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import Sidebar from './components/Sidebar.vue'
 import TerminalView from './components/TerminalView.vue'
-import Toolbar from './components/Toolbar.vue'
-import AgentWorkspace from './components/AgentWorkspace.vue'
-import GitWorkspace from './components/GitWorkspace.vue'
-import CloneRepositoryModal from './components/CloneRepositoryModal.vue'
-import AppMenuBar from './components/AppMenuBar.vue'
-import { useStore } from './state/store'
-import type { AppConfig, ExternalOpenTarget } from '../shared/types'
+import WorkspaceCreateModal from './components/WorkspaceCreateModal.vue'
+import WorkspaceFinishModal from './components/WorkspaceFinishModal.vue'
 
+const store = useStore()
 const {
   config,
   projects,
   project,
+  workspace,
   onboardingRequired,
   filterText,
-  projectCollapsedById,
   lastError,
+  selectedProjectId,
+  selectedWorkspaceId,
   selectedTask,
   selectedTaskBuffer,
-  selectedTaskRunning,
+  selectedTaskRuntime,
   selectedTaskStats,
-  selectedProjectId,
-  loadConfig,
-  saveConfig,
-  setSelectedTaskId,
-  setSelectedProjectId,
-  setProjectCollapsed,
-  getTaskRunning,
-  getTaskStats,
-  getAgentRuntime,
-  startTask,
-  stopTask,
-  restartTask,
-  inputTask,
-  resizeTask,
-  clearTaskBuffer,
-  clearError,
-} = useStore()
+  selectedAgentBuffer,
+  selectedAgentRuntime,
+} = store
 
-const terminalRef = ref<InstanceType<typeof TerminalView> | null>(null)
 const sidebarRef = ref<InstanceType<typeof Sidebar> | null>(null)
+const agentRef = ref<InstanceType<typeof AgentWorkspace> | null>(null)
+const taskTerminalRef = ref<InstanceType<typeof TerminalView> | null>(null)
+const loading = ref(true)
+const loadError = ref('')
 const settingsOpen = ref(false)
 const settingsProjectId = ref('')
 const newProjectOpen = ref(false)
-const cloneProjectOpen = ref(false)
-const loading = ref(true)
-const loadError = ref('')
-const workspaceTab = ref<'tasks' | 'agents' | 'git'>('tasks')
+const cloneOpen = ref(false)
+const createWorkspaceOpen = ref(false)
+const finishWorkspaceOpen = ref(false)
+const rebindOpen = ref(false)
+const rebindCheckoutId = ref('')
+const checkout = ref<Checkout | null>(null)
+const projectCheckouts = ref<Checkout[]>([])
+const gitOpen = ref(true)
+const taskPanelOpen = ref(true)
+const taskPanelExpanded = ref(false)
+
+const profile = computed(() => config.value?.agentProfiles.find((item) => item.id === workspace.value?.profileId))
+const agentRunning = computed(() => ['starting', 'running'].includes(selectedAgentRuntime.value.state))
 
 watch(
   () => config.value?.preferences.appearance,
   (appearance) => {
-    if (!appearance || appearance === 'system') {
-      document.documentElement.removeAttribute('data-theme')
-    } else {
-      document.documentElement.dataset.theme = appearance
-    }
+    if (!appearance || appearance === 'system') document.documentElement.removeAttribute('data-theme')
+    else document.documentElement.dataset.theme = appearance
   },
   { immediate: true },
 )
 
-const headerText = computed(() => {
-  if (!project.value || !selectedTask.value) {
-    return 'Exedeck'
-  }
-
-  return `${project.value.name} - ${selectedTask.value.name}`
-})
-
-const selectedTaskStatusLabel = computed(() => (selectedTaskRunning.value ? 'Running' : 'Stopped'))
+watch(
+  () => workspace.value?.checkoutId,
+  async () => {
+    checkout.value = null
+    projectCheckouts.value = []
+    if (!workspace.value) return
+    projectCheckouts.value = await window.exedeck.git.listCheckouts(workspace.value.projectId)
+    checkout.value = projectCheckouts.value.find((item) => item.id === workspace.value?.checkoutId) ?? null
+  },
+  { immediate: true },
+)
 
 async function initialize(): Promise<void> {
   loading.value = true
   loadError.value = ''
   try {
-    await loadConfig()
-  } catch {
-    loadError.value = lastError.value || 'Exedeck could not load its configuration.'
+    await store.loadConfig()
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : 'Exedeck could not load its configuration.'
   } finally {
     loading.value = false
   }
 }
 
-const onGlobalKeydown = (event: KeyboardEvent): void => {
-  if (settingsOpen.value || newProjectOpen.value || cloneProjectOpen.value || onboardingRequired.value) {
-    return
-  }
-
-  const modifier = event.metaKey || event.ctrlKey
+function onKeydown(event: KeyboardEvent): void {
+  const modifier = event.ctrlKey || event.metaKey
   if (modifier && event.key.toLowerCase() === 'f') {
     event.preventDefault()
     sidebarRef.value?.focusSearch()
-    return
   }
-
-  if (modifier && event.key === ',') {
-    event.preventDefault()
-    if (selectedProjectId.value) {
-      onOpenProjectSettings(selectedProjectId.value)
-    }
-    return
-  }
-
   if ((event.ctrlKey && event.key === '`') || event.key === 'F6') {
     event.preventDefault()
-    onFocus()
+    if (taskPanelExpanded.value) taskTerminalRef.value?.focusTerminal()
+    else agentRef.value?.focusTerminal()
   }
 }
-
 onMounted(() => {
-  window.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('keydown', onKeydown)
   void initialize()
 })
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onGlobalKeydown)
-})
-
-const onTerminalInput = async (data: string): Promise<void> => {
-  if (!selectedTask.value) {
-    return
-  }
-
-  await inputTask(selectedTask.value.id, data)
+async function onWorkspaceCreated(workspaceId: string): Promise<void> {
+  createWorkspaceOpen.value = false
+  await store.loadConfig()
+  await store.activateWorkspace(workspaceId)
 }
 
-const onTerminalResize = async (size: { cols: number; rows: number }): Promise<void> => {
-  if (!selectedTask.value) {
-    return
-  }
-
-  await resizeTask(selectedTask.value.id, size.cols, size.rows)
+async function onWorkspaceFinished(): Promise<void> {
+  finishWorkspaceOpen.value = false
+  await store.loadConfig()
 }
 
-const onFocus = (): void => {
-  terminalRef.value?.focusTerminal()
+async function rebind(): Promise<void> {
+  if (!workspace.value || !rebindCheckoutId.value) return
+  const rebound = await window.exedeck.workspaces.rebind({
+    workspaceId: workspace.value.id,
+    checkoutId: rebindCheckoutId.value,
+  })
+  if (rebound) {
+    rebindOpen.value = false
+    await store.loadConfig()
+    await store.activateWorkspace(rebound.id)
+  } else lastError.value = 'The workspace could not be rebound to that checkout.'
 }
 
-const onClear = async (): Promise<void> => {
-  if (!selectedTask.value) {
-    return
-  }
-
-  await clearTaskBuffer(selectedTask.value.id)
-  terminalRef.value?.clearTerminal()
+async function openExternal(target: ExternalOpenTarget): Promise<void> {
+  if (!project.value) return
+  const ok = checkout.value
+    ? await window.exedeck.git.openExternal(checkout.value.id, target)
+    : await window.exedeck.projects.openExternal(project.value.id, target)
+  if (!ok) lastError.value = `Exedeck could not open this project in ${target}.`
 }
 
-const onStart = async (taskId: string): Promise<void> => {
-  await startTask(taskId)
-}
-
-const onStartSelected = async (): Promise<void> => {
-  if (selectedTask.value) {
-    await onStart(selectedTask.value.id)
-  }
-}
-
-const onStop = async (): Promise<void> => {
-  if (!selectedTask.value) {
-    return
-  }
-
-  await stopTask(selectedTask.value.id)
-}
-
-const onRestart = async (): Promise<void> => {
-  if (!selectedTask.value) {
-    return
-  }
-
-  await restartTask(selectedTask.value.id)
-}
-
-const onFilterChange = (value: string): void => {
-  filterText.value = value
-}
-
-const onOpenProjectSettings = (projectId: string): void => {
+function openProjectSettings(projectId: string): void {
   settingsProjectId.value = projectId
-  setProjectCollapsed(projectId, true)
   settingsOpen.value = true
 }
 
-const onOpenNewProject = (): void => {
+function openRebind(): void {
+  rebindCheckoutId.value = projectCheckouts.value[0]?.id ?? ''
+  rebindOpen.value = true
+}
+
+function clearSelectedTask(): void {
+  if (!selectedTask.value) return
+  void store.clearTaskBuffer(selectedTask.value.id)
+  taskTerminalRef.value?.clearTerminal()
+}
+
+function createProjectFromSettings(): void {
+  settingsOpen.value = false
   newProjectOpen.value = true
 }
 
-const onProjectCloned = async (projectId: string): Promise<void> => {
-  await loadConfig()
-  setSelectedProjectId(projectId)
-  cloneProjectOpen.value = false
-  workspaceTab.value = 'git'
-}
-
-const onSelectTask = (projectId: string, taskId: string): void => {
-  setSelectedProjectId(projectId)
-  setSelectedTaskId(taskId)
-  workspaceTab.value = 'tasks'
-}
-
-const onSelectWorkspace = (projectId: string, workspace: 'tasks' | 'agents' | 'git'): void => {
-  setSelectedProjectId(projectId)
-  workspaceTab.value = workspace
-}
-
-const onMenuSelectWorkspace = (workspace: 'tasks' | 'agents' | 'git'): void => {
-  if (project.value) workspaceTab.value = workspace
-}
-
-const onOpenProjectExternal = async (target: ExternalOpenTarget): Promise<void> => {
-  if (!project.value) return
-  if (!(await window.exedeck.projects.openExternal(project.value.id, target))) {
-    lastError.value = target === 'editor'
-      ? 'Configure an editor command in project settings first.'
-      : `Exedeck could not open the project in ${target}.`
-  }
-}
-
-const onCloseSettings = (): void => {
+async function saveSettings(next: AppConfig, nextProjectId: string): Promise<void> {
+  await store.saveConfig(next)
   settingsOpen.value = false
   settingsProjectId.value = ''
+  store.selectProject(nextProjectId)
 }
 
-const onCloseNewProject = (): void => {
+async function onboardingComplete(next: AppConfig): Promise<void> {
+  await store.saveConfig(next)
+  store.selectProject(next.projects.at(-1)?.id ?? '')
+}
+async function projectCreated(projectId: string): Promise<void> {
+  await store.loadConfig()
+  store.selectProject(projectId)
   newProjectOpen.value = false
 }
-
-const onSaveSettings = async (nextConfig: AppConfig, nextProjectId: string): Promise<void> => {
-  try {
-    await saveConfig(nextConfig)
-    setSelectedProjectId(nextProjectId)
-    settingsOpen.value = false
-    settingsProjectId.value = ''
-  } catch {
-    // The store exposes the actionable error in the global alert.
-  }
-}
-
-const onWorkspaceSaveConfig = async (nextConfig: AppConfig): Promise<void> => {
-  try {
-    await saveConfig(nextConfig)
-  } catch {
-    // The store exposes the actionable error in the global alert.
-  }
-}
-
-const onOnboardingComplete = async (nextConfig: AppConfig): Promise<void> => {
-  try {
-    await saveConfig(nextConfig)
-    setSelectedProjectId(nextConfig.projects[0]?.id ?? '')
-  } catch {
-    // The onboarding dialog remains open so the user can retry.
-  }
-}
-
-const onProjectCreated = async (projectId: string): Promise<void> => {
-  try {
-    await loadConfig()
-    setSelectedProjectId(projectId)
-    newProjectOpen.value = false
-  } catch {
-    // The store exposes the load error without discarding the completed job view.
-  }
-}
-
-const onCreateProjectFromSettings = (): void => {
-  settingsOpen.value = false
-  settingsProjectId.value = ''
-  newProjectOpen.value = true
+async function projectCloned(projectId: string): Promise<void> {
+  await store.loadConfig()
+  store.selectProject(projectId)
+  cloneOpen.value = false
 }
 </script>
 
 <template>
-  <div v-if="config" class="app-shell">
+  <div v-if="config" class="app-shell workspace-first-shell">
     <AppMenuBar
       :project-name="project?.name ?? ''"
       :has-project="Boolean(project)"
-      :workspace="workspaceTab"
-      :has-task="workspaceTab === 'tasks' && Boolean(selectedTask)"
-      :task-running="selectedTaskRunning"
-      @new-project="onOpenNewProject"
-      @clone-project="cloneProjectOpen = true"
-      @settings="selectedProjectId && onOpenProjectSettings(selectedProjectId)"
-      @select-workspace="onMenuSelectWorkspace"
-      @start="onStartSelected"
-      @stop="onStop"
-      @restart="onRestart"
-      @focus="onFocus"
-      @clear="onClear"
-      @open-project="onOpenProjectExternal"
+      :has-workspace="Boolean(workspace)"
+      :agent-running="agentRunning"
+      :git-open="gitOpen"
+      :task-panel-open="taskPanelOpen"
+      @new-project="newProjectOpen = true"
+      @clone-project="cloneOpen = true"
+      @new-workspace="project && (createWorkspaceOpen = true)"
+      @finish-workspace="workspace && (finishWorkspaceOpen = true)"
+      @settings="project && openProjectSettings(project.id)"
+      @start-agent="store.startAgent()"
+      @stop-agent="store.stopAgent()"
+      @toggle-git="gitOpen = !gitOpen"
+      @toggle-tasks="taskPanelOpen = !taskPanelOpen"
+      @open-project="openExternal"
     />
     <div class="layout">
       <Sidebar
-      ref="sidebarRef"
-      :projects="projects"
-      :selected-project-id="selectedProjectId"
-      :selected-task-id="selectedTask?.id ?? ''"
-      :collapsed-by-project="projectCollapsedById"
-      :filter-text="filterText"
-      :is-running="getTaskRunning"
-      :get-stats="getTaskStats"
-      :agent-sessions="config.agentSessions"
-      :get-agent-runtime="getAgentRuntime"
-      :selected-workspace="workspaceTab"
-      @select-project="setSelectedProjectId"
-      @select-task="onSelectTask"
-      @start="onStart"
-      @toggle-project-collapsed="setProjectCollapsed"
-      @update-filter="onFilterChange"
-      @open-project-settings="onOpenProjectSettings"
-      @create-project="onOpenNewProject"
-      @clone-project="cloneProjectOpen = true"
-      @select-workspace="onSelectWorkspace"
+        ref="sidebarRef"
+        :projects="projects"
+        :workspaces="config.agentWorkspaces"
+        :selected-project-id="selectedProjectId"
+        :selected-workspace-id="selectedWorkspaceId"
+        :filter-text="filterText"
+        :get-agent-runtime="store.getAgentRuntime"
+        @select-project="store.selectProject"
+        @select-workspace="store.activateWorkspace"
+        @update-filter="filterText = $event"
+        @open-project-settings="openProjectSettings"
+        @create-workspace="createWorkspaceOpen = true"
+        @create-project="newProjectOpen = true"
+        @clone-project="cloneOpen = true"
       />
 
-      <main class="main-panel">
-      <header class="panel-header">
-        <div class="panel-heading">
-          <span v-if="project" class="panel-eyebrow">{{ project.name }}</span>
-          <h1>{{ workspaceTab === 'tasks' ? (selectedTask?.name ?? 'No task selected') : workspaceTab === 'agents' ? 'Agents' : 'Git' }}</h1>
-        </div>
-        <span v-if="workspaceTab === 'tasks'" class="running-pill" :class="{ active: selectedTaskRunning }" role="status">
-          <span class="status-dot" :class="{ running: selectedTaskRunning }" aria-hidden="true" />
-          {{ selectedTaskStatusLabel }}
-        </span>
-      </header>
+      <main class="main-panel workbench-main">
+        <template v-if="workspace && project">
+          <div class="workbench-row">
+            <AgentWorkspace
+              ref="agentRef"
+              :workspace="workspace"
+              :profile="profile"
+              :checkout="checkout"
+              :runtime="selectedAgentRuntime"
+              :buffer="selectedAgentBuffer"
+              @start="store.startAgent"
+              @stop="store.stopAgent"
+              @restart="store.restartAgent"
+              @input="store.inputAgent"
+              @resize="store.resizeAgent($event.cols, $event.rows)"
+              @clear="store.clearAgentBuffer"
+              @finish="finishWorkspaceOpen = true"
+              @rebind="openRebind"
+            >
+              <template #task-panel>
+                <section v-if="taskPanelOpen" class="task-panel" :class="{ expanded: taskPanelExpanded }">
+                  <header class="task-panel-header" @click="taskPanelExpanded = !taskPanelExpanded">
+                    <div>
+                      <strong>Tasks</strong
+                      ><span
+                        >{{ project.tasks.length }} definitions · {{ checkout?.branch ?? 'checkout missing' }}</span
+                      >
+                    </div>
+                    <div class="task-tabs" @click.stop>
+                      <button
+                        v-for="task in project.tasks"
+                        :key="task.id"
+                        :class="{ active: selectedTask?.id === task.id }"
+                        @click="store.selectTask(task.id)"
+                      >
+                        <span class="status-dot" :class="{ running: store.getTaskRuntime(task.id).running }" />{{
+                          task.name
+                        }}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      class="icon-button"
+                      :aria-label="taskPanelExpanded ? 'Collapse task panel' : 'Expand task panel'"
+                    >
+                      {{ taskPanelExpanded ? '⌄' : '⌃' }}
+                    </button>
+                  </header>
+                  <div v-if="taskPanelExpanded && selectedTask" class="task-panel-body">
+                    <TerminalView
+                      ref="taskTerminalRef"
+                      :task-id="selectedTask.id"
+                      :buffer="selectedTaskBuffer"
+                      @input="store.inputTask(selectedTask.id, $event)"
+                      @resize="store.resizeTask(selectedTask.id, $event.cols, $event.rows)"
+                    />
+                    <div class="task-panel-controls">
+                      <span
+                        v-if="
+                          selectedTaskRuntime.running &&
+                          selectedTaskRuntime.checkoutId &&
+                          selectedTaskRuntime.checkoutId !== workspace.checkoutId
+                        "
+                        >Running in {{ selectedTaskRuntime.checkoutId }}</span
+                      >
+                      <span
+                        >CPU {{ selectedTaskStats.cpu.toFixed(1) }}% · MEM
+                        {{ selectedTaskStats.memoryMb.toFixed(0) }} MB</span
+                      >
+                      <button
+                        v-if="!selectedTaskRuntime.running"
+                        :disabled="!checkout"
+                        @click="store.startTask(selectedTask.id)"
+                      >
+                        Start
+                      </button>
+                      <button v-else @click="store.stopTask(selectedTask.id)">Stop</button>
+                      <button @click="store.restartTask(selectedTask.id)">Restart</button>
+                      <button @click="clearSelectedTask">Clear</button>
+                    </div>
+                  </div>
+                </section>
+              </template>
+            </AgentWorkspace>
+            <aside v-if="gitOpen && checkout" class="git-inspector" aria-label="Git inspector">
+              <GitWorkspace
+                :project="project"
+                :config="config"
+                :active-checkout-id="checkout.id"
+                :agent-running="agentRunning"
+                @save-config="store.saveConfig"
+              />
+            </aside>
+          </div>
+        </template>
 
-      <section v-if="workspaceTab === 'tasks' && selectedTask" class="terminal-section" :aria-label="`${headerText} terminal`">
-        <TerminalView
-          ref="terminalRef"
-          :task-id="selectedTask?.id ?? ''"
-          :buffer="selectedTaskBuffer"
-          @input="onTerminalInput"
-          @resize="onTerminalResize"
-        />
-      </section>
-
-      <section v-else-if="workspaceTab === 'tasks'" class="workspace-empty" aria-labelledby="empty-workspace-title">
-        <div class="empty-illustration" aria-hidden="true">›_</div>
-        <h2 id="empty-workspace-title">No task selected</h2>
-        <p>Add a task in project settings, then start it here to stream its terminal output.</p>
-        <button
-          v-if="selectedProjectId"
-          type="button"
-          class="primary"
-          @click="onOpenProjectSettings(selectedProjectId)"
-        >
-          Open project settings
-        </button>
-      </section>
-
-      <AgentWorkspace
-        v-else-if="workspaceTab === 'agents' && project"
-        :config="config"
-        :project="project"
-        @save-config="onWorkspaceSaveConfig"
-      />
-
-      <GitWorkspace v-else-if="workspaceTab === 'git' && project" :project="project" :config="config" @save-config="onWorkspaceSaveConfig" />
-
-      <footer v-if="workspaceTab === 'tasks'" class="bottom-bar">
-        <Toolbar
-          :disabled="!selectedTask"
-          :running="selectedTaskRunning"
-          @focus="onFocus"
-          @clear="onClear"
-          @start="onStartSelected"
-          @stop="onStop"
-          @restart="onRestart"
-        />
-
-        <div v-if="selectedTask" class="bottom-status" role="group" aria-label="Selected task resource usage">
-          <span>{{ selectedTask.name }}</span>
-          <span title="CPU usage">CPU {{ selectedTaskStats.cpu.toFixed(1) }}%</span>
-          <span title="Memory usage">MEM {{ selectedTaskStats.memoryMb.toFixed(0) }} MB</span>
-        </div>
-      </footer>
+        <section v-else-if="project" class="project-landing">
+          <span class="panel-eyebrow">{{ project.framework === 'custom' ? 'Project' : project.framework }}</span>
+          <h1>{{ project.name }}</h1>
+          <p>{{ project.path }}</p>
+          <div class="landing-primary">
+            <button class="primary" @click="createWorkspaceOpen = true">New agent workspace</button>
+          </div>
+          <div class="landing-actions">
+            <button @click="openExternal('editor')">
+              <strong>Open in editor</strong><span>Continue in your configured editor</span>
+            </button>
+            <button @click="openExternal('terminal')">
+              <strong>Open terminal</strong><span>Shell at the project root</span>
+            </button>
+            <button @click="openExternal('files')">
+              <strong>Show files</strong><span>Open the system file manager</span>
+            </button>
+            <button @click="cloneOpen = true"><strong>Clone repository</strong><span>Add another project</span></button>
+            <button @click="newProjectOpen = true">
+              <strong>New application</strong><span>Laravel or AdonisJS scaffolding</span>
+            </button>
+          </div>
+          <section v-if="project.tasks.length" class="landing-tasks">
+            <div class="task-editor-head">
+              <div>
+                <h2>Project tasks</h2>
+                <p>Without an active agent workspace, these run at the project root.</p>
+              </div>
+              <div class="task-tabs">
+                <button
+                  v-for="task in project.tasks"
+                  :key="task.id"
+                  :class="{ active: selectedTask?.id === task.id }"
+                  @click="store.selectTask(task.id)"
+                >
+                  <span class="status-dot" :class="{ running: store.getTaskRuntime(task.id).running }" />
+                  {{ task.name }}
+                </button>
+              </div>
+            </div>
+            <div v-if="selectedTask" class="landing-task-console">
+              <TerminalView
+                :task-id="selectedTask.id"
+                :buffer="selectedTaskBuffer"
+                @input="store.inputTask(selectedTask.id, $event)"
+                @resize="store.resizeTask(selectedTask.id, $event.cols, $event.rows)"
+              />
+              <div class="task-panel-controls">
+                <span
+                  >CPU {{ selectedTaskStats.cpu.toFixed(1) }}% · MEM
+                  {{ selectedTaskStats.memoryMb.toFixed(0) }} MB</span
+                >
+                <button v-if="!selectedTaskRuntime.running" @click="store.startTask(selectedTask.id)">Start</button>
+                <button v-else @click="store.stopTask(selectedTask.id)">Stop</button>
+                <button @click="store.restartTask(selectedTask.id)">Restart</button>
+              </div>
+            </div>
+          </section>
+        </section>
+        <section v-else class="project-landing">
+          <h1>Choose a project</h1>
+          <p>Open a folder, clone a repository, or scaffold a new application.</p>
+        </section>
       </main>
     </div>
   </div>
 
-  <main v-else-if="loading" class="loading" aria-live="polite">
-    <span class="loading-spinner" aria-hidden="true" />
-    <span>Loading workspace…</span>
-  </main>
-
+  <main v-else-if="loading" class="loading"><span class="loading-spinner" />Loading workspaces…</main>
   <main v-else class="fatal-state">
-    <div class="empty-illustration" aria-hidden="true">!</div>
-    <h1>Exedeck couldn’t open the workspace</h1>
+    <h1>Exedeck couldn’t open</h1>
     <p>{{ loadError }}</p>
-    <button type="button" class="primary" @click="initialize">Try again</button>
+    <button class="primary" @click="initialize">Try again</button>
   </main>
-
   <div v-if="lastError && config" class="error-toast" role="alert">
-    <span>{{ lastError }}</span>
-    <button type="button" aria-label="Dismiss error" @click="clearError">×</button>
+    <span>{{ lastError }}</span
+    ><button @click="store.clearError">×</button>
   </div>
 
-  <OnboardingWizard v-if="config && onboardingRequired" @complete="onOnboardingComplete" />
-
+  <OnboardingWizard
+    v-if="config && onboardingRequired"
+    :config="config"
+    @complete="onboardingComplete"
+    @clone="cloneOpen = true"
+  />
   <SettingsModal
     v-if="settingsOpen && config"
     :config="config"
     :selected-project-id="settingsProjectId || selectedProjectId"
-    @close="onCloseSettings"
-    @save="onSaveSettings"
-    @create-project="onCreateProjectFromSettings"
+    @close="settingsOpen = false"
+    @save="saveSettings"
+    @create-project="createProjectFromSettings"
   />
-
-  <NewProjectWizard
-    v-if="newProjectOpen"
-    @close="onCloseNewProject"
-    @created="onProjectCreated"
-  />
-
+  <NewProjectWizard v-if="newProjectOpen" @close="newProjectOpen = false" @created="projectCreated" />
   <CloneRepositoryModal
-    v-if="cloneProjectOpen && config"
+    v-if="cloneOpen && config"
     :preferences="config.preferences"
-    @close="cloneProjectOpen = false"
-    @cloned="onProjectCloned"
+    @close="cloneOpen = false"
+    @cloned="projectCloned"
   />
+  <WorkspaceCreateModal
+    v-if="createWorkspaceOpen && config && project"
+    :config="config"
+    :project="project"
+    @close="createWorkspaceOpen = false"
+    @created="onWorkspaceCreated"
+  />
+  <WorkspaceFinishModal
+    v-if="finishWorkspaceOpen && workspace"
+    :workspace="workspace"
+    @close="finishWorkspaceOpen = false"
+    @finished="onWorkspaceFinished"
+  />
+  <div v-if="rebindOpen && workspace" class="modal-overlay">
+    <section class="workspace-rebind-modal" role="dialog" aria-modal="true">
+      <header class="modal-header">
+        <div>
+          <span class="modal-eyebrow">Recover workspace</span>
+          <h2>Rebind checkout</h2>
+        </div>
+      </header>
+      <label
+        ><span>Available checkout</span
+        ><select v-model="rebindCheckoutId">
+          <option v-for="item in projectCheckouts" :key="item.id" :value="item.id">
+            {{ item.branch }} — {{ item.path }}
+          </option>
+        </select></label
+      >
+      <footer class="modal-actions">
+        <button @click="rebindOpen = false">Cancel</button
+        ><button class="primary" :disabled="!rebindCheckoutId" @click="rebind">Rebind</button>
+      </footer>
+    </section>
+  </div>
 </template>

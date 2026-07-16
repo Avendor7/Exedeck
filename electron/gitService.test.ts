@@ -17,7 +17,7 @@ async function repository() {
   await writeFile(path.join(root, 'tracked.txt'), 'one\n', 'utf8')
   await exec('git', ['add', 'tracked.txt'], { cwd: root })
   await exec('git', ['commit', '-m', 'Initial commit'], { cwd: root })
-  const config = createDefaultConfig(root)
+  const config = createDefaultConfig()
   config.onboardingCompleted = true
   config.projects = [{ id: 'project-test', name: 'Test', path: root, framework: 'custom', autoStart: false, tasks: [] }]
   const service = new GitService({ getConfig: () => config, isCheckoutBusy: () => false })
@@ -36,7 +36,14 @@ describe('GitService', () => {
     expect(changed.files.map((file) => file.path).sort()).toEqual(['new file.txt', 'tracked.txt'])
     expect(changed.files.find((file) => file.path === 'tracked.txt')?.workingPatch).toContain('+two')
 
-    expect((await service.stage(checkout.id, changed.files.map((file) => file.path))).ok).toBe(true)
+    expect(
+      (
+        await service.stage(
+          checkout.id,
+          changed.files.map((file) => file.path),
+        )
+      ).ok,
+    ).toBe(true)
     expect((await service.commit(checkout.id, 'Add files', 'Exercise structured status')).ok).toBe(true)
     const history = await service.history(checkout.id)
     expect(history[0].subject).toBe('Add files')

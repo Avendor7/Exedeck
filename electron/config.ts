@@ -1,8 +1,10 @@
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { parseArgs } from '../shared/commandArgs'
 import type {
   AgentProfile,
-  AgentSession,
+  AgentWorkspace,
   AppConfig,
   AppPreferences,
   ProjectConfig,
@@ -11,12 +13,12 @@ import type {
 } from '../shared/types'
 
 const CONFIG_FILE = 'exedeck.config.json'
-export const CONFIG_SCHEMA_VERSION = 4
+export const CONFIG_SCHEMA_VERSION = 5
 const MAX_PROJECTS = 100
 const MAX_TASKS_PER_PROJECT = 200
 const MAX_ARGS_PER_TASK = 512
 const MAX_AGENT_PROFILES = 50
-const MAX_AGENT_SESSIONS = 500
+const MAX_AGENT_WORKSPACES = 500
 
 function cleanString(value: unknown, fallback: string, maxLength: number): string {
   if (typeof value !== 'string') {
@@ -40,8 +42,9 @@ function toStringArray(value: unknown): string[] {
   }
 
   if (typeof value === 'string') {
-    const trimmed = value.trim()
-    return trimmed ? trimmed.split(/\s+/).slice(0, MAX_ARGS_PER_TASK) : []
+    return parseArgs(value)
+      .slice(0, MAX_ARGS_PER_TASK)
+      .map((item) => item.replace(/\0/g, '').slice(0, 4096))
   }
 
   return []
@@ -70,9 +73,7 @@ export function createDefaultAgentProfiles(): AgentProfile[] {
 
 function normalizeAgentProfile(raw: unknown, index: number): AgentProfile {
   const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
-  const tool = source.tool === 'codex' || source.tool === 'claude' || source.tool === 'custom'
-    ? source.tool
-    : 'custom'
+  const tool = source.tool === 'codex' || source.tool === 'claude' || source.tool === 'custom' ? source.tool : 'custom'
 
   return {
     id: cleanString(source.id, makeId('agent-profile'), 128),
@@ -84,7 +85,11 @@ function normalizeAgentProfile(raw: unknown, index: number): AgentProfile {
   }
 }
 
-function normalizeAgentSession(raw: unknown, projectIds: Set<string>, profileIds: Set<string>): AgentSession | null {
+function normalizeAgentWorkspace(
+  raw: unknown,
+  projectIds: Set<string>,
+  profileIds: Set<string>,
+): AgentWorkspace | null {
   const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   const projectId = cleanString(source.projectId, '', 128)
   const profileId = cleanString(source.profileId, '', 128)
@@ -93,33 +98,41 @@ function normalizeAgentSession(raw: unknown, projectIds: Set<string>, profileIds
   }
 
   const checkoutId = cleanString(source.checkoutId, `${projectId}:root`, 256)
-  const createdAt = typeof source.createdAt === 'number' && Number.isFinite(source.createdAt)
-    ? Math.max(0, Math.floor(source.createdAt))
-    : Date.now()
+  const createdAt =
+    typeof source.createdAt === 'number' && Number.isFinite(source.createdAt)
+      ? Math.max(0, Math.floor(source.createdAt))
+      : Date.now()
   const resumeId = cleanString(source.resumeId, '', 256)
+  const archivedAt =
+    typeof source.archivedAt === 'number' && Number.isFinite(source.archivedAt)
+      ? Math.max(createdAt, Math.floor(source.archivedAt))
+      : undefined
 
   return {
-    id: cleanString(source.id, makeId('agent-session'), 128),
+    id: cleanString(source.id, makeId('agent-workspace'), 128),
     projectId,
     checkoutId,
     profileId,
-    title: cleanString(source.title, 'Agent session', 160),
+    title: cleanString(source.title, 'Agent workspace', 160),
     createdAt,
+    ...(archivedAt ? { archivedAt } : {}),
     ...(resumeId ? { resumeId } : {}),
   }
 }
 
 function normalizePreferences(raw: unknown): AppPreferences {
   const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
-  const appearance = source.appearance === 'light' || source.appearance === 'dark' || source.appearance === 'system'
-    ? source.appearance
-    : 'system'
+  const appearance =
+    source.appearance === 'light' || source.appearance === 'dark' || source.appearance === 'system'
+      ? source.appearance
+      : 'system'
 
   return {
     appearance,
     editorCommand: cleanString(source.editorCommand, '', 2048),
     cloneDirectory: cleanString(source.cloneDirectory, '', 4096),
     aiProfileId: cleanString(source.aiProfileId, 'agent-profile-codex', 128),
+    lastWorkspaceId: cleanString(source.lastWorkspaceId, '', 128),
   }
 }
 
@@ -145,13 +158,16 @@ function normalizeProject(raw: unknown, repoRoot: string, index: number): Projec
     source.framework === 'laravel' || source.framework === 'adonisjs' || source.framework === 'custom'
       ? source.framework
       : 'custom'
-  const rawBranchParents = source.branchParents && typeof source.branchParents === 'object'
-    ? source.branchParents as Record<string, unknown>
-    : {}
-  const branchParents = Object.fromEntries(Object.entries(rawBranchParents)
-    .filter(([branch, parent]) => branch.length <= 240 && typeof parent === 'string' && parent.length <= 240)
-    .slice(0, 500)
-    .map(([branch, parent]) => [branch.replace(/\0/g, ''), (parent as string).replace(/\0/g, '')]))
+  const rawBranchParents =
+    source.branchParents && typeof source.branchParents === 'object'
+      ? (source.branchParents as Record<string, unknown>)
+      : {}
+  const branchParents = Object.fromEntries(
+    Object.entries(rawBranchParents)
+      .filter(([branch, parent]) => branch.length <= 240 && typeof parent === 'string' && parent.length <= 240)
+      .slice(0, 500)
+      .map(([branch, parent]) => [branch.replace(/\0/g, ''), (parent as string).replace(/\0/g, '')]),
+  )
 
   return {
     id: cleanString(source.id, makeId('project'), 128),
@@ -170,7 +186,7 @@ function ensureUniqueIds(config: AppConfig): AppConfig {
   const projectIds = new Set<string>()
   const taskIds = new Set<string>()
   const profileIds = new Set<string>()
-  const sessionIds = new Set<string>()
+  const workspaceIds = new Set<string>()
 
   for (const project of config.projects) {
     if (projectIds.has(project.id)) {
@@ -193,30 +209,30 @@ function ensureUniqueIds(config: AppConfig): AppConfig {
     profileIds.add(profile.id)
   }
 
-  for (const session of config.agentSessions) {
-    if (sessionIds.has(session.id)) {
-      session.id = makeId('agent-session')
+  for (const workspace of config.agentWorkspaces) {
+    if (workspaceIds.has(workspace.id)) {
+      workspace.id = makeId('agent-workspace')
     }
-    sessionIds.add(session.id)
+    workspaceIds.add(workspace.id)
   }
 
   return config
 }
 
-export function createDefaultConfig(_repoRoot: string): AppConfig {
+export function createDefaultConfig(): AppConfig {
   return {
     schemaVersion: CONFIG_SCHEMA_VERSION,
     onboardingCompleted: false,
     projects: [],
     preferences: normalizePreferences(undefined),
     agentProfiles: createDefaultAgentProfiles(),
-    agentSessions: [],
+    agentWorkspaces: [],
   }
 }
 
 export function normalizeConfig(candidate: unknown, repoRoot: string): AppConfig {
   if (!candidate || typeof candidate !== 'object') {
-    return createDefaultConfig(repoRoot)
+    return createDefaultConfig()
   }
 
   const source = candidate as Record<string, unknown>
@@ -228,19 +244,18 @@ export function normalizeConfig(candidate: unknown, repoRoot: string): AppConfig
   const onboardingCompleted =
     typeof source.onboardingCompleted === 'boolean' ? source.onboardingCompleted : projects.length > 0
 
-  const rawProfiles = Array.isArray(source.agentProfiles) && source.agentProfiles.length > 0
-    ? source.agentProfiles
-    : createDefaultAgentProfiles()
-  const agentProfiles = rawProfiles
-    .slice(0, MAX_AGENT_PROFILES)
-    .map(normalizeAgentProfile)
+  const rawProfiles =
+    Array.isArray(source.agentProfiles) && source.agentProfiles.length > 0
+      ? source.agentProfiles
+      : createDefaultAgentProfiles()
+  const agentProfiles = rawProfiles.slice(0, MAX_AGENT_PROFILES).map(normalizeAgentProfile)
   const projectIds = new Set(projects.map((project) => project.id))
   const profileIds = new Set(agentProfiles.map((profile) => profile.id))
-  const rawSessions = Array.isArray(source.agentSessions) ? source.agentSessions : []
-  const agentSessions = rawSessions
-    .slice(0, MAX_AGENT_SESSIONS)
-    .map((session) => normalizeAgentSession(session, projectIds, profileIds))
-    .filter((session): session is AgentSession => session !== null)
+  const rawWorkspaces = Array.isArray(source.agentWorkspaces) ? source.agentWorkspaces : []
+  const agentWorkspaces = rawWorkspaces
+    .slice(0, MAX_AGENT_WORKSPACES)
+    .map((workspace) => normalizeAgentWorkspace(workspace, projectIds, profileIds))
+    .filter((workspace): workspace is AgentWorkspace => workspace !== null)
 
   const config = ensureUniqueIds({
     schemaVersion: CONFIG_SCHEMA_VERSION,
@@ -248,11 +263,18 @@ export function normalizeConfig(candidate: unknown, repoRoot: string): AppConfig
     projects,
     preferences: normalizePreferences(source.preferences),
     agentProfiles,
-    agentSessions,
+    agentWorkspaces,
   })
 
   if (!config.agentProfiles.some((profile) => profile.id === config.preferences.aiProfileId)) {
     config.preferences.aiProfileId = config.agentProfiles[0]?.id ?? ''
+  }
+
+  const lastWorkspace = config.agentWorkspaces.find(
+    (workspace) => workspace.id === config.preferences.lastWorkspaceId && !workspace.archivedAt,
+  )
+  if (!lastWorkspace) {
+    config.preferences.lastWorkspaceId = config.agentWorkspaces.find((workspace) => !workspace.archivedAt)?.id ?? ''
   }
 
   return config
@@ -291,18 +313,22 @@ export async function loadOrCreateConfig(userDataDir: string, repoRoot: string):
     }
   }
 
-  const defaults = createDefaultConfig(repoRoot)
+  const defaults = createDefaultConfig()
   await saveConfig(userDataDir, defaults)
   return defaults
 }
 
 export async function saveConfig(userDataDir: string, config: AppConfig): Promise<void> {
   const configPath = getConfigPath(userDataDir)
-  const temporaryPath = `${configPath}.${process.pid}.tmp`
+  const temporaryPath = `${configPath}.${process.pid}.${randomUUID()}.tmp`
   await fs.mkdir(userDataDir, { recursive: true })
-  await fs.writeFile(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-  })
-  await fs.rename(temporaryPath, configPath)
+  try {
+    await fs.writeFile(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    })
+    await fs.rename(temporaryPath, configPath)
+  } finally {
+    await fs.rm(temporaryPath, { force: true })
+  }
 }

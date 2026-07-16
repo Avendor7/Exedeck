@@ -9,10 +9,7 @@ const focusableSelector = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
 
-export function useDialogFocus(
-  dialogRef: Ref<HTMLElement | null>,
-  requestClose?: () => void,
-): void {
+export function useDialogFocus(dialogRef: Ref<HTMLElement | null>, requestClose?: () => void): void {
   let previouslyFocused: HTMLElement | null = null
 
   const getFocusableElements = (): HTMLElement[] => {
