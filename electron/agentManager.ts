@@ -55,20 +55,20 @@ export class AgentManager {
     })
   }
 
-  async start(workspaceId: string, prompt?: string): Promise<boolean> {
-    const resolved = await this.resolveWorkspace(workspaceId)
+  async start(agentId: string, prompt?: string): Promise<boolean> {
+    const resolved = await this.resolveAgent(agentId)
     if (!resolved) return false
     const args = [...resolved.profile.args]
-    if (resolved.workspace.resumeId) {
-      if (resolved.profile.tool === 'codex') args.push('resume', resolved.workspace.resumeId)
-      if (resolved.profile.tool === 'claude') args.push('--resume', resolved.workspace.resumeId)
+    if (resolved.agent.resumeId) {
+      if (resolved.profile.tool === 'codex') args.push('resume', resolved.agent.resumeId)
+      if (resolved.profile.tool === 'claude') args.push('--resume', resolved.agent.resumeId)
     }
     if (prompt?.trim()) args.push(prompt.trim().slice(0, 32_000))
-    this.options.onStatus({ workspaceId, state: 'starting', unread: false })
-    this.unread.delete(workspaceId)
+    this.options.onStatus({ workspaceId: agentId, state: 'starting', unread: false })
+    this.unread.delete(agentId)
     return this.runtime.start({
-      id: workspaceId,
-      name: resolved.workspace.title,
+      id: agentId,
+      name: resolved.agent.name,
       command: resolved.profile.command,
       args,
       cwd: resolved.checkout.path,
@@ -89,11 +89,11 @@ export class AgentManager {
   }
 
   async resize(workspaceId: string, cols: number, rows: number): Promise<boolean> {
-    const resolved = await this.resolveWorkspace(workspaceId)
+    const resolved = await this.resolveAgent(workspaceId)
     if (!resolved) return false
     this.runtime.ensure({
       id: workspaceId,
-      name: resolved.workspace.title,
+      name: resolved.agent.name,
       command: resolved.profile.command,
       args: resolved.profile.args,
       cwd: resolved.checkout.path,
@@ -126,14 +126,19 @@ export class AgentManager {
 
   getStatuses(): Record<string, AgentRuntimeSnapshot> {
     return Object.fromEntries(
-      this.options.getConfig().agentWorkspaces.map((workspace) => [workspace.id, this.getStatus(workspace.id)]),
+      this.options
+        .getConfig()
+        .workspaces.flatMap((workspace) => workspace.agents.map((agent) => [agent.id, this.getStatus(agent.id)])),
     )
   }
 
   isCheckoutBusy(checkoutId: string): boolean {
     return this.options
       .getConfig()
-      .agentWorkspaces.some((workspace) => workspace.checkoutId === checkoutId && this.runtime.isRunning(workspace.id))
+      .workspaces.some(
+        (workspace) =>
+          workspace.checkoutId === checkoutId && workspace.agents.some((agent) => this.runtime.isRunning(agent.id)),
+      )
   }
 
   async discoverTools(): Promise<AgentToolStatus[]> {
@@ -152,31 +157,39 @@ export class AgentManager {
 
   async reconcileConfig(nextConfig: AppConfig): Promise<void> {
     const currentConfig = this.options.getConfig()
-    const nextWorkspaces = new Map(nextConfig.agentWorkspaces.map((workspace) => [workspace.id, workspace]))
-    const currentWorkspaces = new Map(currentConfig.agentWorkspaces.map((workspace) => [workspace.id, workspace]))
+    const nextAgents = new Map(
+      nextConfig.workspaces.flatMap((workspace) =>
+        workspace.agents.map((agent) => [agent.id, { agent, workspace }] as const),
+      ),
+    )
+    const currentAgents = new Map(
+      currentConfig.workspaces.flatMap((workspace) =>
+        workspace.agents.map((agent) => [agent.id, { agent, workspace }] as const),
+      ),
+    )
     const currentProfiles = new Map(currentConfig.agentProfiles.map((profile) => [profile.id, profile]))
     const nextProfiles = new Map(nextConfig.agentProfiles.map((profile) => [profile.id, profile]))
     const currentProjects = new Map(currentConfig.projects.map((project) => [project.id, project]))
     const nextProjects = new Map(nextConfig.projects.map((project) => [project.id, project]))
 
     const toStop = this.runtime.listRunningIds().filter((id) => {
-      const currentWorkspace = currentWorkspaces.get(id)
-      const nextWorkspace = nextWorkspaces.get(id)
-      if (!currentWorkspace || !nextWorkspace || nextWorkspace.archivedAt) return true
+      const current = currentAgents.get(id)
+      const next = nextAgents.get(id)
+      if (!current || !next) return true
 
-      const currentProfile = currentProfiles.get(currentWorkspace.profileId)
-      const nextProfile = nextProfiles.get(nextWorkspace.profileId)
+      const currentProfile = currentProfiles.get(current.agent.profileId)
+      const nextProfile = nextProfiles.get(next.agent.profileId)
       const projectPathChanged =
-        currentProjects.get(currentWorkspace.projectId)?.path !== nextProjects.get(nextWorkspace.projectId)?.path
+        currentProjects.get(current.workspace.projectId)?.path !== nextProjects.get(next.workspace.projectId)?.path
 
       return (
         !currentProfile ||
         !nextProfile ||
         !nextProfile.enabled ||
         projectPathChanged ||
-        currentWorkspace.projectId !== nextWorkspace.projectId ||
-        currentWorkspace.checkoutId !== nextWorkspace.checkoutId ||
-        currentWorkspace.profileId !== nextWorkspace.profileId ||
+        current.workspace.projectId !== next.workspace.projectId ||
+        current.workspace.checkoutId !== next.workspace.checkoutId ||
+        current.agent.profileId !== next.agent.profileId ||
         currentProfile.command !== nextProfile.command ||
         currentProfile.args.join('\0') !== nextProfile.args.join('\0')
       )
@@ -184,7 +197,7 @@ export class AgentManager {
 
     await Promise.all(toStop.map((id) => this.stop(id)))
     for (const id of this.runtime.listIds()) {
-      if (!nextWorkspaces.has(id)) {
+      if (!nextAgents.has(id)) {
         this.runtime.forget(id)
         this.unread.delete(id)
         this.crashed.delete(id)
@@ -199,14 +212,17 @@ export class AgentManager {
     this.runtime.killAllImmediately()
   }
 
-  private async resolveWorkspace(workspaceId: string) {
-    const workspace = this.options.getConfig().agentWorkspaces.find((item) => item.id === workspaceId)
-    if (!workspace || workspace.archivedAt) return null
-    const profile = this.options.getConfig().agentProfiles.find((item) => item.id === workspace.profileId)
+  private async resolveAgent(agentId: string) {
+    const workspace = this.options
+      .getConfig()
+      .workspaces.find((item) => item.agents.some((agent) => agent.id === agentId))
+    const agent = workspace?.agents.find((item) => item.id === agentId)
+    if (!workspace || !agent) return null
+    const profile = this.options.getConfig().agentProfiles.find((item) => item.id === agent.profileId)
     if (!profile?.enabled || !profile.command) return null
     const checkout = await this.options.resolveCheckout(workspace.checkoutId)
     if (!checkout || checkout.projectId !== workspace.projectId) return null
-    return { workspace, profile, checkout }
+    return { workspace, agent, profile, checkout }
   }
 }
 

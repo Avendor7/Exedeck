@@ -30,15 +30,31 @@ export interface AgentProfile {
   enabled: boolean
 }
 
-export interface AgentWorkspace {
+export interface WorkspaceAgent {
+  id: string
+  profileId: string
+  name: string
+  createdAt: number
+  resumeId?: string
+}
+
+export interface WorkspaceTerminal {
+  id: string
+  name: string
+  command: string
+  args: string[]
+  createdAt: number
+}
+
+export interface WorkspaceConfig {
   id: string
   projectId: string
   checkoutId: string
-  profileId: string
-  title: string
+  name: string
+  kind: 'root' | 'worktree'
   createdAt: number
-  archivedAt?: number
-  resumeId?: string
+  agents: WorkspaceAgent[]
+  terminals: WorkspaceTerminal[]
 }
 
 export type AppearancePreference = 'system' | 'light' | 'dark'
@@ -57,7 +73,7 @@ export interface AppConfig {
   projects: ProjectConfig[]
   preferences: AppPreferences
   agentProfiles: AgentProfile[]
-  agentWorkspaces: AgentWorkspace[]
+  workspaces: WorkspaceConfig[]
 }
 
 export interface TaskDataEvent {
@@ -154,25 +170,18 @@ export interface Checkout {
   busy: boolean
 }
 
-export type WorkspaceCheckoutMode = 'root' | 'worktree'
-
 export interface WorkspaceCreateRequest {
   projectId: string
-  profileId: string
-  title: string
-  mode: WorkspaceCheckoutMode
-  checkoutId?: string
-  branch?: string
+  name: string
+  branch: string
   parentBranch?: string
-  worktreePath?: string
-  start?: boolean
+  worktreePath: string
 }
 
 export interface WorkspaceCreateResult {
   ok: boolean
-  workspace?: AgentWorkspace
+  workspace?: WorkspaceConfig
   checkout?: Checkout
-  started: boolean
   error?: string
 }
 
@@ -183,7 +192,7 @@ export interface WorkspaceRebindRequest {
 
 export interface WorkspaceFinishPreview {
   workspaceId: string
-  agentState: AgentRuntimeState
+  runningItems: number
   checkout?: Checkout
   checkoutMissing: boolean
   clean: boolean
@@ -417,7 +426,7 @@ export interface AgentsApi {
 
 export interface WorkspacesApi {
   create: (request: WorkspaceCreateRequest) => Promise<WorkspaceCreateResult>
-  rebind: (request: WorkspaceRebindRequest) => Promise<AgentWorkspace | null>
+  rebind: (request: WorkspaceRebindRequest) => Promise<WorkspaceConfig | null>
   finishPreview: (workspaceId: string) => Promise<WorkspaceFinishPreview | null>
   finish: (request: WorkspaceFinishRequest) => Promise<WorkspaceFinishResult>
 }

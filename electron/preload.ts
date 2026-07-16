@@ -36,7 +36,7 @@ import type {
   WorkspaceFinishRequest,
   WorkspaceFinishResult,
   WorkspaceRebindRequest,
-  AgentWorkspace,
+  WorkspaceConfig,
 } from '../shared/types'
 
 function subscribe<T>(channel: string, listener: (event: T) => void): () => void {
@@ -97,7 +97,7 @@ const api: ExedeckApi = {
     create: (request) =>
       ipcRenderer.invoke('workspace:create', request as WorkspaceCreateRequest) as Promise<WorkspaceCreateResult>,
     rebind: (request) =>
-      ipcRenderer.invoke('workspace:rebind', request as WorkspaceRebindRequest) as Promise<AgentWorkspace | null>,
+      ipcRenderer.invoke('workspace:rebind', request as WorkspaceRebindRequest) as Promise<WorkspaceConfig | null>,
     finishPreview: (workspaceId) =>
       ipcRenderer.invoke('workspace:finish-preview', workspaceId) as Promise<WorkspaceFinishPreview | null>,
     finish: (request) =>

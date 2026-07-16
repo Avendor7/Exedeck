@@ -73,12 +73,13 @@ describe('configuration persistence', () => {
       root,
     )
 
-    expect(migrated.schemaVersion).toBe(5)
+    expect(migrated.schemaVersion).toBe(6)
     expect(migrated.projects[0].id).toBe('project-existing')
     expect(migrated.projects[0].tasks[0].id).toBe('task-existing')
     expect(migrated.agentProfiles.map((profile) => profile.tool)).toEqual(['codex', 'claude'])
     expect(migrated.preferences.appearance).toBe('system')
-    expect(migrated.agentWorkspaces).toEqual([])
+    expect(migrated.workspaces).toHaveLength(1)
+    expect(migrated.workspaces[0]?.kind).toBe('root')
   })
 
   it('preserves quoted arguments from legacy string configuration', () => {

@@ -5,10 +5,10 @@ import type { ExternalOpenTarget, WindowCommand, WindowState } from '../../share
 const props = defineProps<{
   projectName: string
   hasProject: boolean
-  hasWorkspace: boolean
+  hasAgent: boolean
+  canFinishWorkspace: boolean
   agentRunning: boolean
   gitOpen: boolean
-  taskPanelOpen: boolean
 }>()
 const emit = defineEmits<{
   newProject: []
@@ -19,7 +19,6 @@ const emit = defineEmits<{
   startAgent: []
   stopAgent: []
   toggleGit: []
-  toggleTasks: []
   openProject: [target: ExternalOpenTarget]
 }>()
 const openMenu = ref<string | null>(null)
@@ -43,10 +42,6 @@ function onKeydown(event: KeyboardEvent): void {
   if (modifier && event.shiftKey && event.key.toLowerCase() === 'n' && props.hasProject) {
     event.preventDefault()
     emit('newWorkspace')
-  }
-  if (modifier && event.key.toLowerCase() === 'j') {
-    event.preventDefault()
-    emit('toggleTasks')
   }
   if (modifier && event.key.toLowerCase() === 'g') {
     event.preventDefault()
@@ -81,7 +76,7 @@ onBeforeUnmount(() => {
         </button>
         <div v-if="openMenu === 'file'" class="app-menu-popover">
           <button :disabled="!hasProject" @click="action(() => emit('newWorkspace'))">
-            <span>New Agent Workspace</span><kbd>Ctrl+Shift+N</kbd>
+            <span>New Worktree Workspace</span><kbd>Ctrl+Shift+N</kbd>
           </button>
           <button @click="action(() => emit('newProject'))">New Application</button>
           <button @click="action(() => emit('cloneProject'))">Clone Repository</button>
@@ -99,11 +94,11 @@ onBeforeUnmount(() => {
           Workspace
         </button>
         <div v-if="openMenu === 'workspace'" class="app-menu-popover">
-          <button :disabled="!hasWorkspace || agentRunning" @click="action(() => emit('startAgent'))">
-            Start Agent
-          </button>
+          <button :disabled="!hasAgent || agentRunning" @click="action(() => emit('startAgent'))">Start Agent</button>
           <button :disabled="!agentRunning" @click="action(() => emit('stopAgent'))">Stop Agent</button>
-          <button :disabled="!hasWorkspace" @click="action(() => emit('finishWorkspace'))">Finish Workspace…</button>
+          <button :disabled="!canFinishWorkspace" @click="action(() => emit('finishWorkspace'))">
+            Remove Workspace…
+          </button>
           <div class="app-menu-separator" />
           <button :disabled="!hasProject" @click="action(() => emit('openProject', 'editor'))">Open in Editor</button>
           <button :disabled="!hasProject" @click="action(() => emit('openProject', 'terminal'))">Open Terminal</button>
@@ -121,9 +116,6 @@ onBeforeUnmount(() => {
         <div v-if="openMenu === 'view'" class="app-menu-popover">
           <button @click="action(() => emit('toggleGit'))">
             <span>{{ gitOpen ? 'Hide' : 'Show' }} Git Inspector</span><kbd>Ctrl+G</kbd>
-          </button>
-          <button @click="action(() => emit('toggleTasks'))">
-            <span>{{ taskPanelOpen ? 'Hide' : 'Show' }} Task Panel</span><kbd>Ctrl+J</kbd>
           </button>
           <div class="app-menu-separator" />
           <button @click="command('zoomIn')">Zoom In</button><button @click="command('zoomOut')">Zoom Out</button

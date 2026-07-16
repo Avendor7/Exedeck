@@ -35,7 +35,7 @@ describe('config IPC serialization', () => {
         lastWorkspaceId: '',
       },
       agentProfiles: [],
-      agentWorkspaces: [],
+      workspaces: [],
     })
 
     expect(isProxy(config.preferences)).toBe(true)

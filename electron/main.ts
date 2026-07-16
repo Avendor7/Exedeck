@@ -277,6 +277,7 @@ const workspaceService = new WorkspaceService({
   applyConfig,
   git: gitService,
   agents: agentManager,
+  tasks: taskManager,
 })
 
 const aiService = new AiService(() => appConfig, gitService)
@@ -516,31 +517,24 @@ function registerIpcHandlers(): void {
   ipcMain.handle('workspace:create', async (event, candidate: unknown) => {
     assertTrustedIpc(event)
     if (!candidate || typeof candidate !== 'object') {
-      return { ok: false, started: false, error: 'Invalid request.' }
+      return { ok: false, error: 'Invalid request.' }
     }
     const source = candidate as Record<string, unknown>
     if (
       !isSafeId(source.projectId) ||
-      !isSafeId(source.profileId) ||
-      !isBoundedString(source.title, 160) ||
-      (source.mode !== 'root' && source.mode !== 'worktree') ||
-      (source.checkoutId !== undefined && !isBoundedString(source.checkoutId, 256)) ||
-      (source.branch !== undefined && !isBoundedString(source.branch, 240)) ||
+      !isBoundedString(source.name, 160) ||
+      !isBoundedString(source.branch, 240) ||
       (source.parentBranch !== undefined && !isBoundedString(source.parentBranch, 240)) ||
-      (source.worktreePath !== undefined && !isBoundedString(source.worktreePath, 4096))
+      !isBoundedString(source.worktreePath, 4096)
     ) {
-      return { ok: false, started: false, error: 'Invalid request.' }
+      return { ok: false, error: 'Invalid request.' }
     }
     const request: WorkspaceCreateRequest = {
       projectId: source.projectId,
-      profileId: source.profileId,
-      title: source.title,
-      mode: source.mode,
-      ...(typeof source.checkoutId === 'string' ? { checkoutId: source.checkoutId } : {}),
-      ...(typeof source.branch === 'string' ? { branch: source.branch } : {}),
+      name: source.name,
+      branch: source.branch,
+      worktreePath: source.worktreePath,
       ...(typeof source.parentBranch === 'string' ? { parentBranch: source.parentBranch } : {}),
-      ...(typeof source.worktreePath === 'string' ? { worktreePath: source.worktreePath } : {}),
-      start: source.start === true,
     }
     return serializeConfigMutation(() => workspaceService.create(request))
   })

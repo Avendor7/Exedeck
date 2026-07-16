@@ -8,6 +8,7 @@ import type {
   TaskStartRequest,
   TaskStartResult,
   TaskStatusEvent,
+  WorkspaceTerminal,
 } from '../shared/types'
 import type { ProcessDefinition } from './processRuntime'
 import { ProcessRuntimeManager } from './processRuntime'
@@ -50,7 +51,7 @@ export class TaskManager {
     }
 
     const rootCheckoutId = `${resolved.projectId}:root`
-    const checkoutId = request.checkoutId ?? rootCheckoutId
+    const checkoutId = request.checkoutId ?? resolved.defaultCheckoutId
     const checkout = checkoutId === rootCheckoutId ? null : await this.options.resolveCheckout(checkoutId)
     if (checkoutId !== rootCheckoutId && (!checkout || checkout.projectId !== resolved.projectId)) {
       return this.startFailure('The selected checkout is unavailable.')
@@ -80,7 +81,7 @@ export class TaskManager {
       const resolved = this.findTask(taskId)
       if (!resolved) return false
       binding = {
-        checkoutId: `${resolved.projectId}:root`,
+        checkoutId: resolved.defaultCheckoutId,
         definition: this.toDefinition(resolved.task, resolved.projectPath),
       }
       this.bindings.set(taskId, binding)
@@ -112,7 +113,14 @@ export class TaskManager {
     return Object.fromEntries(
       this.options
         .getConfig()
-        .projects.flatMap((project) => project.tasks.map((task) => [task.id, this.getTaskStatus(task.id)])),
+        .projects.flatMap((project) => project.tasks.map((task) => [task.id, this.getTaskStatus(task.id)]))
+        .concat(
+          this.options
+            .getConfig()
+            .workspaces.flatMap((workspace) =>
+              workspace.terminals.map((terminal) => [terminal.id, this.getTaskStatus(terminal.id)]),
+            ),
+        ),
     )
   }
   listRunningTaskIds(): string[] {
@@ -128,9 +136,13 @@ export class TaskManager {
   }
 
   async reconcileConfig(nextConfig: AppConfig): Promise<void> {
-    const nextTasks = new Map<string, { task: TaskConfig; projectPath: string }>()
+    const nextTasks = new Map<string, { task: TaskConfig | WorkspaceTerminal; projectPath: string }>()
     for (const project of nextConfig.projects) {
       for (const task of project.tasks) nextTasks.set(task.id, { task, projectPath: project.path })
+    }
+    for (const workspace of nextConfig.workspaces) {
+      const projectPath = nextConfig.projects.find((project) => project.id === workspace.projectId)?.path ?? ''
+      for (const terminal of workspace.terminals) nextTasks.set(terminal.id, { task: terminal, projectPath })
     }
     const toStop = this.runtime.listRunningIds().filter((id) => {
       const current = this.findTask(id)
@@ -175,19 +187,50 @@ export class TaskManager {
     return this.runtime.listRunningIds().some((taskId) => this.bindings.get(taskId)?.checkoutId === checkoutId)
   }
 
-  private findTask(taskId: string): { task: TaskConfig; projectId: string; projectPath: string } | undefined {
+  private findTask(
+    taskId: string,
+  ):
+    | { task: TaskConfig | WorkspaceTerminal; projectId: string; projectPath: string; defaultCheckoutId: string }
+    | undefined {
     for (const project of this.options.getConfig().projects) {
       const task = project.tasks.find((item) => item.id === taskId)
-      if (task) return { task, projectId: project.id, projectPath: project.path }
+      if (task) {
+        return {
+          task,
+          projectId: project.id,
+          projectPath: project.path,
+          defaultCheckoutId: `${project.id}:root`,
+        }
+      }
+      const workspace = this.options
+        .getConfig()
+        .workspaces.find(
+          (item) => item.projectId === project.id && item.terminals.some((terminal) => terminal.id === taskId),
+        )
+      const terminal = workspace?.terminals.find((item) => item.id === taskId)
+      if (workspace && terminal) {
+        return {
+          task: terminal,
+          projectId: project.id,
+          projectPath: project.path,
+          defaultCheckoutId: workspace.checkoutId,
+        }
+      }
     }
     return undefined
   }
 
-  private toDefinition(task: TaskConfig, projectPath: string) {
-    return { id: task.id, name: task.name, command: task.command, args: task.args, cwd: projectPath }
+  private toDefinition(task: TaskConfig | WorkspaceTerminal, projectPath: string) {
+    const command = task.command.trim() || defaultShell()
+    return { id: task.id, name: task.name, command, args: task.args, cwd: projectPath }
   }
 
   private startFailure(message: string): TaskStartResult {
     return { ok: false, running: false, alreadyRunning: false, message }
   }
+}
+
+function defaultShell(): string {
+  if (process.platform === 'win32') return process.env.ComSpec || 'cmd.exe'
+  return process.env.SHELL || '/bin/sh'
 }

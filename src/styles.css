@@ -2258,7 +2258,7 @@ textarea {
 }
 
 .workspace-sidebar {
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
 .workspace-sidebar .sidebar-header {
@@ -2366,6 +2366,146 @@ textarea {
 .workspace-tree-item.active {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   background: var(--accent-surface);
+}
+
+.workspace-branch {
+  position: relative;
+  margin: 3px 0 3px 18px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-strong);
+}
+
+.workspace-node {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.workspace-node:hover,
+.workspace-node.active {
+  border-color: var(--border);
+  background: var(--panel-hover);
+}
+
+.workspace-node.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-surface);
+}
+
+.workspace-node-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.workspace-node-main > span:last-child,
+.workspace-item > span:nth-child(2) {
+  min-width: 0;
+  display: grid;
+}
+
+.workspace-node-main strong,
+.workspace-node-main small,
+.workspace-item strong,
+.workspace-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-node-main small,
+.workspace-item small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.workspace-glyph {
+  width: 23px;
+  height: 23px;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.workspace-node-actions {
+  display: flex;
+  gap: 2px;
+  padding-right: 4px;
+  opacity: 0;
+}
+
+.workspace-node:hover .workspace-node-actions,
+.workspace-node:focus-within .workspace-node-actions {
+  opacity: 1;
+}
+
+.workspace-node-actions button,
+.tree-remove {
+  min-width: 23px;
+  min-height: 23px;
+  padding: 2px 4px;
+  border-color: transparent;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: 10px;
+}
+
+.workspace-children {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  margin: 2px 0 5px 11px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+
+.workspace-item-wrap {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.workspace-item {
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.workspace-item.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-surface);
+}
+
+.workspace-item-wrap .tree-remove {
+  opacity: 0;
+}
+
+.workspace-item-wrap:hover .tree-remove,
+.workspace-item-wrap:focus-within .tree-remove {
+  opacity: 1;
+}
+
+.workspace-empty {
+  margin: 0;
+  padding: 7px 8px;
+  color: var(--text-muted);
+  font-size: 10px;
 }
 
 .unread-dot {
@@ -2494,6 +2634,24 @@ textarea {
 
 .agent-terminal {
   min-height: 0;
+}
+
+.process-surface {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.process-surface .agent-terminal {
+  grid-row: 2;
+}
+
+.process-status {
+  grid-row: 3;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--panel-raised);
+  font-size: 10px;
+  text-align: right;
 }
 
 .agent-terminal.disabled {
@@ -2646,6 +2804,30 @@ textarea {
 
 .landing-primary {
   margin-top: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-summary-grid {
+  max-width: 920px;
+  margin-top: 28px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.workspace-summary-grid button {
+  min-height: 76px;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  text-align: left;
+}
+
+.workspace-summary-grid span {
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .landing-actions {

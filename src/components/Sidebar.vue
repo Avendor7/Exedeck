@@ -1,62 +1,81 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { AgentRuntimeSnapshot, AgentWorkspace, ProjectConfig } from '../../shared/types'
+import type { AgentRuntimeSnapshot, ProjectConfig, TaskRuntimeSnapshot, WorkspaceConfig } from '../../shared/types'
+import type { WorkspaceItemKind } from '../state/store'
 
 const props = defineProps<{
   projects: ProjectConfig[]
-  workspaces: AgentWorkspace[]
+  workspaces: WorkspaceConfig[]
   selectedProjectId: string
   selectedWorkspaceId: string
+  selectedItemKind: WorkspaceItemKind
+  selectedItemId: string
   filterText: string
-  getAgentRuntime: (workspaceId: string) => AgentRuntimeSnapshot
+  getAgentRuntime: (agentId: string) => AgentRuntimeSnapshot
+  getTaskRuntime: (itemId: string) => TaskRuntimeSnapshot
 }>()
 
 const emit = defineEmits<{
   selectProject: [projectId: string]
   selectWorkspace: [workspaceId: string]
+  selectItem: [kind: 'agent' | 'terminal' | 'task', id: string]
   updateFilter: [value: string]
   openProjectSettings: [projectId: string]
-  createWorkspace: []
+  createWorkspace: [projectId: string]
+  createAgent: [workspaceId: string]
+  createTerminal: [workspaceId: string]
+  removeWorkspace: [workspaceId: string]
+  removeItem: [kind: 'agent' | 'terminal', id: string]
   createProject: []
   cloneProject: []
 }>()
 
 const searchRef = ref<HTMLInputElement | null>(null)
-const archivedOpen = ref(false)
 const query = computed(() => props.filterText.trim().toLowerCase())
 const visibleProjects = computed(() =>
   props.projects.filter((project) => {
     if (!query.value) return true
+    const workspaces = props.workspaces.filter((workspace) => workspace.projectId === project.id)
     return (
       project.name.toLowerCase().includes(query.value) ||
-      props.workspaces.some(
-        (workspace) => workspace.projectId === project.id && workspace.title.toLowerCase().includes(query.value),
+      project.tasks.some((task) => task.name.toLowerCase().includes(query.value)) ||
+      workspaces.some(
+        (workspace) =>
+          workspace.name.toLowerCase().includes(query.value) ||
+          workspace.agents.some((agent) => agent.name.toLowerCase().includes(query.value)) ||
+          workspace.terminals.some((terminal) => terminal.name.toLowerCase().includes(query.value)),
       )
     )
   }),
 )
-const activeFor = (projectId: string) =>
-  props.workspaces.filter((workspace) => workspace.projectId === projectId && !workspace.archivedAt)
-const archived = computed(() => props.workspaces.filter((workspace) => workspace.archivedAt))
-const projectName = (projectId: string) => props.projects.find((project) => project.id === projectId)?.name ?? 'Project'
+const workspacesFor = (projectId: string) => props.workspaces.filter((item) => item.projectId === projectId)
+
+function selectTask(workspaceId: string, taskId: string): void {
+  emit('selectWorkspace', workspaceId)
+  emit('selectItem', 'task', taskId)
+}
+
+function selectNestedItem(workspaceId: string, kind: 'agent' | 'terminal', itemId: string): void {
+  emit('selectWorkspace', workspaceId)
+  emit('selectItem', kind, itemId)
+}
 
 defineExpose({ focusSearch: () => searchRef.value?.focus() })
 </script>
 
 <template>
-  <aside class="sidebar workspace-sidebar" aria-label="Projects and agent workspaces">
+  <aside class="sidebar workspace-sidebar" aria-label="Projects and workspaces">
     <header class="sidebar-header">
       <div>
         <span class="panel-eyebrow">Navigator</span>
-        <h2>Workspaces</h2>
+        <h2>Projects</h2>
       </div>
       <button
         type="button"
         class="small primary"
-        aria-label="New agent workspace"
-        title="New agent workspace"
+        aria-label="New worktree workspace"
         :disabled="!selectedProjectId"
-        @click="selectedProjectId && emit('createWorkspace')"
+        @click="selectedProjectId && emit('createWorkspace', selectedProjectId)"
       >
         +
       </button>
@@ -67,12 +86,12 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
         :value="filterText"
         type="search"
         placeholder="Filter projects…"
-        aria-label="Filter projects and workspaces"
+        aria-label="Filter projects and workspace items"
         @input="emit('updateFilter', ($event.target as HTMLInputElement).value)"
       />
     </div>
 
-    <nav class="workspace-tree" aria-label="Agent workspaces">
+    <nav class="workspace-tree" aria-label="Workspace tree">
       <section v-for="project in visibleProjects" :key="project.id" class="workspace-project-group">
         <div
           class="workspace-project-row"
@@ -94,43 +113,120 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
             •••
           </button>
         </div>
-        <button
-          v-for="workspace in activeFor(project.id)"
-          :key="workspace.id"
-          type="button"
-          class="workspace-tree-item"
-          :class="{ active: selectedWorkspaceId === workspace.id }"
-          @click="emit('selectWorkspace', workspace.id)"
-        >
-          <span class="status-dot" :class="{ running: getAgentRuntime(workspace.id).state === 'running' }" />
-          <span
-            ><strong>{{ workspace.title }}</strong
-            ><small>{{ getAgentRuntime(workspace.id).state }}</small></span
+
+        <div v-for="workspace in workspacesFor(project.id)" :key="workspace.id" class="workspace-branch">
+          <div
+            class="workspace-node"
+            :class="{ active: selectedWorkspaceId === workspace.id && selectedItemKind === 'workspace' }"
           >
-          <span v-if="getAgentRuntime(workspace.id).unread" class="unread-dot" aria-label="Unread output" />
-        </button>
-        <button
-          v-if="activeFor(project.id).length === 0"
-          type="button"
-          class="task-only-project"
-          @click="emit('selectProject', project.id)"
-        >
-          {{ project.tasks.length ? `${project.tasks.length} project tasks` : 'Project landing page' }}
-        </button>
+            <button type="button" class="workspace-node-main" @click="emit('selectWorkspace', workspace.id)">
+              <span class="workspace-glyph">{{ workspace.kind === 'root' ? '⌂' : '⑂' }}</span>
+              <span
+                ><strong>{{ workspace.name }}</strong
+                ><small>{{ workspace.kind === 'root' ? 'project checkout' : 'worktree' }}</small></span
+              >
+            </button>
+            <div class="workspace-node-actions">
+              <button
+                type="button"
+                title="Add agent"
+                :aria-label="`Add agent to ${workspace.name}`"
+                @click="emit('createAgent', workspace.id)"
+              >
+                A
+              </button>
+              <button
+                type="button"
+                title="Add terminal"
+                :aria-label="`Add terminal to ${workspace.name}`"
+                @click="emit('createTerminal', workspace.id)"
+              >
+                &gt;_
+              </button>
+              <button
+                v-if="workspace.kind === 'worktree'"
+                type="button"
+                title="Remove workspace"
+                :aria-label="`Remove ${workspace.name}`"
+                @click="emit('removeWorkspace', workspace.id)"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          <div class="workspace-children">
+            <div v-for="agent in workspace.agents" :key="agent.id" class="workspace-item-wrap">
+              <button
+                type="button"
+                class="workspace-item"
+                :class="{ active: selectedItemKind === 'agent' && selectedItemId === agent.id }"
+                @click="selectNestedItem(workspace.id, 'agent', agent.id)"
+              >
+                <span class="status-dot" :class="{ running: getAgentRuntime(agent.id).state === 'running' }" />
+                <span
+                  ><strong>{{ agent.name }}</strong
+                  ><small>agent · {{ getAgentRuntime(agent.id).state }}</small></span
+                >
+              </button>
+              <button
+                class="tree-remove"
+                type="button"
+                :aria-label="`Remove ${agent.name}`"
+                @click="emit('removeItem', 'agent', agent.id)"
+              >
+                ×
+              </button>
+            </div>
+            <div v-for="terminal in workspace.terminals" :key="terminal.id" class="workspace-item-wrap">
+              <button
+                type="button"
+                class="workspace-item"
+                :class="{ active: selectedItemKind === 'terminal' && selectedItemId === terminal.id }"
+                @click="selectNestedItem(workspace.id, 'terminal', terminal.id)"
+              >
+                <span class="status-dot" :class="{ running: getTaskRuntime(terminal.id).running }" />
+                <span
+                  ><strong>{{ terminal.name }}</strong
+                  ><small>terminal · {{ getTaskRuntime(terminal.id).running ? 'running' : 'stopped' }}</small></span
+                >
+              </button>
+              <button
+                class="tree-remove"
+                type="button"
+                :aria-label="`Remove ${terminal.name}`"
+                @click="emit('removeItem', 'terminal', terminal.id)"
+              >
+                ×
+              </button>
+            </div>
+            <button
+              v-for="task in project.tasks"
+              :key="`${workspace.id}:${task.id}`"
+              type="button"
+              class="workspace-item"
+              :class="{
+                active:
+                  selectedWorkspaceId === workspace.id && selectedItemKind === 'task' && selectedItemId === task.id,
+              }"
+              @click="selectTask(workspace.id, task.id)"
+            >
+              <span class="status-dot" :class="{ running: getTaskRuntime(task.id).running }" />
+              <span
+                ><strong>{{ task.name }}</strong
+                ><small>task · {{ getTaskRuntime(task.id).running ? 'running' : 'stopped' }}</small></span
+              >
+            </button>
+            <p
+              v-if="!workspace.agents.length && !workspace.terminals.length && !project.tasks.length"
+              class="workspace-empty"
+            >
+              Add an agent or terminal
+            </p>
+          </div>
+        </div>
       </section>
     </nav>
-
-    <section v-if="archived.length" class="archived-workspaces">
-      <button type="button" class="archived-toggle" :aria-expanded="archivedOpen" @click="archivedOpen = !archivedOpen">
-        <span>{{ archivedOpen ? '▾' : '▸' }} Archived</span><span>{{ archived.length }}</span>
-      </button>
-      <div v-if="archivedOpen">
-        <div v-for="workspace in archived" :key="workspace.id" class="archived-item">
-          <span>{{ workspace.title }}</span
-          ><small>{{ projectName(workspace.projectId) }}</small>
-        </div>
-      </div>
-    </section>
 
     <footer class="sidebar-actions">
       <button type="button" @click="emit('createProject')">New application</button>

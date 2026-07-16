@@ -28,7 +28,7 @@ interface DraftConfig {
   projects: DraftProject[]
   preferences: AppConfig['preferences']
   agentProfiles: AppConfig['agentProfiles']
-  agentWorkspaces: AppConfig['agentWorkspaces']
+  workspaces: AppConfig['workspaces']
 }
 
 const props = defineProps<{
@@ -71,7 +71,11 @@ function toDraftConfig(config: AppConfig): DraftConfig {
     projects: config.projects.map(toDraftProject),
     preferences: { ...config.preferences },
     agentProfiles: config.agentProfiles.map((profile) => ({ ...profile, args: [...profile.args] })),
-    agentWorkspaces: config.agentWorkspaces.map((workspace) => ({ ...workspace })),
+    workspaces: config.workspaces.map((workspace) => ({
+      ...workspace,
+      agents: workspace.agents.map((agent) => ({ ...agent })),
+      terminals: workspace.terminals.map((terminal) => ({ ...terminal, args: [...terminal.args] })),
+    })),
   }
 }
 
@@ -169,7 +173,7 @@ function addAgentProfile(): void {
 }
 
 function removeAgentProfile(profileId: string): void {
-  if (draft.value.agentWorkspaces.some((workspace) => workspace.profileId === profileId)) {
+  if (draft.value.workspaces.some((workspace) => workspace.agents.some((agent) => agent.profileId === profileId))) {
     return
   }
   draft.value.agentProfiles = draft.value.agentProfiles.filter((profile) => profile.id !== profileId)
@@ -223,7 +227,11 @@ function saveDraft(): void {
     projects: nextProjects,
     preferences: { ...draft.value.preferences },
     agentProfiles: draft.value.agentProfiles.map((profile) => ({ ...profile, args: [...profile.args] })),
-    agentWorkspaces: draft.value.agentWorkspaces.map((workspace) => ({ ...workspace })),
+    workspaces: draft.value.workspaces.map((workspace) => ({
+      ...workspace,
+      agents: workspace.agents.map((agent) => ({ ...agent })),
+      terminals: workspace.terminals.map((terminal) => ({ ...terminal, args: [...terminal.args] })),
+    })),
   }
 
   const nextSelectedProjectId =
@@ -342,7 +350,9 @@ function saveDraft(): void {
                 v-if="profile.tool === 'custom'"
                 type="button"
                 class="danger small"
-                :disabled="draft.agentWorkspaces.some((workspace) => workspace.profileId === profile.id)"
+                :disabled="
+                  draft.workspaces.some((workspace) => workspace.agents.some((agent) => agent.profileId === profile.id))
+                "
                 @click="removeAgentProfile(profile.id)"
               >
                 Remove

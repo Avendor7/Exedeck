@@ -1,18 +1,23 @@
 import { computed, ref } from 'vue'
 import type {
   AgentRuntimeSnapshot,
-  AgentWorkspace,
   AppConfig,
   ProjectConfig,
   TaskConfig,
   TaskRuntimeSnapshot,
+  WorkspaceAgent,
+  WorkspaceConfig,
+  WorkspaceTerminal,
 } from '../../shared/types'
 import { prepareConfigForIpc } from '../utils/configSerialization'
+
+export type WorkspaceItemKind = 'workspace' | 'agent' | 'terminal' | 'task'
 
 const config = ref<AppConfig | null>(null)
 const selectedProjectId = ref('')
 const selectedWorkspaceId = ref('')
-const selectedTaskId = ref('')
+const selectedItemKind = ref<WorkspaceItemKind>('workspace')
+const selectedItemId = ref('')
 const filterText = ref('')
 const lastError = ref('')
 const taskBuffers = ref<Record<string, string>>({})
@@ -63,18 +68,24 @@ function attachListeners(): void {
 }
 
 function ensureSelections(next: AppConfig): void {
-  const active = next.agentWorkspaces.filter((workspace) => !workspace.archivedAt)
-  const preferred = active.find((workspace) => workspace.id === next.preferences.lastWorkspaceId)
-  const selected = active.find((workspace) => workspace.id === selectedWorkspaceId.value)
-  const workspace = selected ?? preferred ?? active[0]
+  const preferred = next.workspaces.find((item) => item.id === next.preferences.lastWorkspaceId)
+  const selected = next.workspaces.find((item) => item.id === selectedWorkspaceId.value)
+  const workspace = selected ?? preferred ?? next.workspaces[0]
   selectedWorkspaceId.value = workspace?.id ?? ''
   const project =
     next.projects.find((item) => item.id === workspace?.projectId) ??
     next.projects.find((item) => item.id === selectedProjectId.value) ??
     next.projects[0]
   selectedProjectId.value = project?.id ?? ''
-  if (!project?.tasks.some((task) => task.id === selectedTaskId.value)) {
-    selectedTaskId.value = project?.tasks[0]?.id ?? ''
+
+  const itemStillExists =
+    selectedItemKind.value === 'workspace' ||
+    (selectedItemKind.value === 'agent' && workspace?.agents.some((item) => item.id === selectedItemId.value)) ||
+    (selectedItemKind.value === 'terminal' && workspace?.terminals.some((item) => item.id === selectedItemId.value)) ||
+    (selectedItemKind.value === 'task' && project?.tasks.some((item) => item.id === selectedItemId.value))
+  if (!itemStillExists) {
+    selectedItemKind.value = 'workspace'
+    selectedItemId.value = ''
   }
 }
 
@@ -84,10 +95,10 @@ async function loadTaskBuffer(taskId: string, force = false): Promise<void> {
   loadedTaskBuffers.add(taskId)
 }
 
-async function loadAgentBuffer(workspaceId: string, force = false): Promise<void> {
-  if (!workspaceId || (loadedAgentBuffers.has(workspaceId) && !force)) return
-  agentBuffers.value[workspaceId] = await window.exedeck.agents.getBuffer(workspaceId)
-  loadedAgentBuffers.add(workspaceId)
+async function loadAgentBuffer(agentId: string, force = false): Promise<void> {
+  if (!agentId || (loadedAgentBuffers.has(agentId) && !force)) return
+  agentBuffers.value[agentId] = await window.exedeck.agents.getBuffer(agentId)
+  loadedAgentBuffers.add(agentId)
 }
 
 export function useStore() {
@@ -95,27 +106,45 @@ export function useStore() {
   const project = computed<ProjectConfig | null>(
     () => projects.value.find((item) => item.id === selectedProjectId.value) ?? null,
   )
-  const workspace = computed<AgentWorkspace | null>(
-    () => config.value?.agentWorkspaces.find((item) => item.id === selectedWorkspaceId.value) ?? null,
+  const workspace = computed<WorkspaceConfig | null>(
+    () => config.value?.workspaces.find((item) => item.id === selectedWorkspaceId.value) ?? null,
   )
-  const activeWorkspaces = computed(() => config.value?.agentWorkspaces.filter((item) => !item.archivedAt) ?? [])
-  const archivedWorkspaces = computed(() => config.value?.agentWorkspaces.filter((item) => item.archivedAt) ?? [])
+  const selectedAgent = computed<WorkspaceAgent | null>(
+    () =>
+      (selectedItemKind.value === 'agent'
+        ? workspace.value?.agents.find((item) => item.id === selectedItemId.value)
+        : null) ?? null,
+  )
+  const selectedTerminal = computed<WorkspaceTerminal | null>(
+    () =>
+      (selectedItemKind.value === 'terminal'
+        ? workspace.value?.terminals.find((item) => item.id === selectedItemId.value)
+        : null) ?? null,
+  )
   const selectedTask = computed<TaskConfig | null>(
-    () => project.value?.tasks.find((item) => item.id === selectedTaskId.value) ?? project.value?.tasks[0] ?? null,
+    () =>
+      (selectedItemKind.value === 'task'
+        ? project.value?.tasks.find((item) => item.id === selectedItemId.value)
+        : null) ?? null,
   )
+  const selectedProcess = computed(() => selectedTerminal.value ?? selectedTask.value)
   const selectedTaskBuffer = computed(() =>
-    selectedTask.value ? (taskBuffers.value[selectedTask.value.id] ?? '') : '',
+    selectedProcess.value ? (taskBuffers.value[selectedProcess.value.id] ?? '') : '',
   )
   const selectedTaskRuntime = computed<TaskRuntimeSnapshot>(() =>
-    selectedTask.value ? (taskRuntime.value[selectedTask.value.id] ?? { running: false }) : { running: false },
+    selectedProcess.value ? (taskRuntime.value[selectedProcess.value.id] ?? { running: false }) : { running: false },
   )
   const selectedTaskStats = computed(() =>
-    selectedTask.value ? (taskStats.value[selectedTask.value.id] ?? { cpu: 0, memoryMb: 0 }) : { cpu: 0, memoryMb: 0 },
+    selectedProcess.value
+      ? (taskStats.value[selectedProcess.value.id] ?? { cpu: 0, memoryMb: 0 })
+      : { cpu: 0, memoryMb: 0 },
   )
-  const selectedAgentBuffer = computed(() => (workspace.value ? (agentBuffers.value[workspace.value.id] ?? '') : ''))
+  const selectedAgentBuffer = computed(() =>
+    selectedAgent.value ? (agentBuffers.value[selectedAgent.value.id] ?? '') : '',
+  )
   const selectedAgentRuntime = computed<AgentRuntimeSnapshot>(() =>
-    workspace.value
-      ? (agentRuntime.value[workspace.value.id] ?? { state: 'stopped', unread: false })
+    selectedAgent.value
+      ? (agentRuntime.value[selectedAgent.value.id] ?? { state: 'stopped', unread: false })
       : { state: 'stopped', unread: false },
   )
   const onboardingRequired = computed(() => Boolean(config.value && config.value.projects.length === 0))
@@ -129,7 +158,6 @@ export function useStore() {
       window.exedeck.processes.getStatuses(),
       window.exedeck.agents.getStatuses(),
     ])
-    await Promise.all([loadTaskBuffer(selectedTaskId.value), loadAgentBuffer(selectedWorkspaceId.value)])
   }
 
   async function saveConfig(next: AppConfig): Promise<void> {
@@ -144,14 +172,14 @@ export function useStore() {
   }
 
   async function activateWorkspace(workspaceId: string): Promise<void> {
-    const nextWorkspace = config.value?.agentWorkspaces.find((item) => item.id === workspaceId && !item.archivedAt)
+    const nextWorkspace = config.value?.workspaces.find((item) => item.id === workspaceId)
     if (!nextWorkspace || !config.value) return
     selectedWorkspaceId.value = workspaceId
     selectedProjectId.value = nextWorkspace.projectId
-    selectedTaskId.value = config.value.projects.find((item) => item.id === nextWorkspace.projectId)?.tasks[0]?.id ?? ''
-    await Promise.all([loadAgentBuffer(workspaceId), window.exedeck.agents.markRead(workspaceId)])
+    selectedItemKind.value = 'workspace'
+    selectedItemId.value = ''
     if (config.value.preferences.lastWorkspaceId !== workspaceId) {
-      config.value = await window.exedeck.projects.setConfig({
+      await saveConfig({
         ...config.value,
         preferences: { ...config.value.preferences, lastWorkspaceId: workspaceId },
       })
@@ -161,13 +189,18 @@ export function useStore() {
   function selectProject(projectId: string): void {
     selectedProjectId.value = projectId
     selectedWorkspaceId.value = ''
-    selectedTaskId.value = config.value?.projects.find((item) => item.id === projectId)?.tasks[0]?.id ?? ''
-    void loadTaskBuffer(selectedTaskId.value)
+    selectedItemKind.value = 'workspace'
+    selectedItemId.value = ''
   }
 
-  function selectTask(taskId: string): void {
-    selectedTaskId.value = taskId
-    void loadTaskBuffer(taskId)
+  async function selectWorkspaceItem(kind: Exclude<WorkspaceItemKind, 'workspace'>, id: string): Promise<void> {
+    selectedItemKind.value = kind
+    selectedItemId.value = id
+    if (kind === 'agent') {
+      await Promise.all([loadAgentBuffer(id), window.exedeck.agents.markRead(id)])
+    } else {
+      await loadTaskBuffer(id)
+    }
   }
 
   async function startTask(taskId: string): Promise<void> {
@@ -175,12 +208,7 @@ export function useStore() {
       taskId,
       ...(workspace.value ? { checkoutId: workspace.value.checkoutId } : {}),
     })
-    if (!result.ok) {
-      lastError.value =
-        result.alreadyRunning && result.checkoutId
-          ? `This task is already running in checkout ${result.checkoutId}.`
-          : result.message || 'The task could not be started.'
-    }
+    if (!result.ok) lastError.value = result.message || 'The process could not be started.'
   }
 
   async function restartTask(taskId: string): Promise<void> {
@@ -188,7 +216,7 @@ export function useStore() {
       taskId,
       ...(workspace.value ? { checkoutId: workspace.value.checkoutId } : {}),
     })
-    if (!result.ok) lastError.value = result.message || 'The task could not be restarted.'
+    if (!result.ok) lastError.value = result.message || 'The process could not be restarted.'
   }
 
   return {
@@ -196,15 +224,17 @@ export function useStore() {
     projects,
     project,
     workspace,
-    activeWorkspaces,
-    archivedWorkspaces,
     onboardingRequired,
     filterText,
     lastError,
     selectedProjectId,
     selectedWorkspaceId,
-    selectedTaskId,
+    selectedItemKind,
+    selectedItemId,
+    selectedAgent,
+    selectedTerminal,
     selectedTask,
+    selectedProcess,
     selectedTaskBuffer,
     selectedTaskRuntime,
     selectedTaskStats,
@@ -216,7 +246,7 @@ export function useStore() {
     saveConfig,
     activateWorkspace,
     selectProject,
-    selectTask,
+    selectWorkspaceItem,
     startTask,
     restartTask,
     stopTask: (taskId: string) => window.exedeck.processes.stop(taskId),
@@ -226,18 +256,20 @@ export function useStore() {
       if (await window.exedeck.processes.clearBuffer(taskId)) taskBuffers.value[taskId] = ''
     },
     startAgent: (prompt?: string) =>
-      workspace.value
-        ? window.exedeck.agents.start({ workspaceId: workspace.value.id, prompt })
+      selectedAgent.value
+        ? window.exedeck.agents.start({ workspaceId: selectedAgent.value.id, prompt })
         : Promise.resolve(false),
-    stopAgent: () => (workspace.value ? window.exedeck.agents.stop(workspace.value.id) : Promise.resolve(false)),
-    restartAgent: () => (workspace.value ? window.exedeck.agents.restart(workspace.value.id) : Promise.resolve(false)),
+    stopAgent: () =>
+      selectedAgent.value ? window.exedeck.agents.stop(selectedAgent.value.id) : Promise.resolve(false),
+    restartAgent: () =>
+      selectedAgent.value ? window.exedeck.agents.restart(selectedAgent.value.id) : Promise.resolve(false),
     inputAgent: (data: string) =>
-      workspace.value ? window.exedeck.agents.input(workspace.value.id, data) : Promise.resolve(false),
+      selectedAgent.value ? window.exedeck.agents.input(selectedAgent.value.id, data) : Promise.resolve(false),
     resizeAgent: (cols: number, rows: number) =>
-      workspace.value ? window.exedeck.agents.resize(workspace.value.id, cols, rows) : Promise.resolve(false),
+      selectedAgent.value ? window.exedeck.agents.resize(selectedAgent.value.id, cols, rows) : Promise.resolve(false),
     clearAgentBuffer: async () => {
-      if (workspace.value && (await window.exedeck.agents.clearBuffer(workspace.value.id))) {
-        agentBuffers.value[workspace.value.id] = ''
+      if (selectedAgent.value && (await window.exedeck.agents.clearBuffer(selectedAgent.value.id))) {
+        agentBuffers.value[selectedAgent.value.id] = ''
       }
     },
     getAgentRuntime: (id: string) => agentRuntime.value[id] ?? { state: 'stopped', unread: false },

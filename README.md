@@ -1,23 +1,26 @@
 # Exedeck
 
-Exedeck is a cross-platform workbench for persistent CLI-agent workspaces. Each
-workspace binds one project, one Git checkout, one primary agent, and optional
-development tasks. Opening Exedeck restores the last workspace without starting
-its agent; starting processes always remains explicit.
+Exedeck is a cross-platform workbench for persistent project workspaces. Every
+project has a permanent Root workspace and can add isolated Git worktree
+workspaces. Each workspace can contain multiple CLI agents, persistent
+terminals, and project tasks. Starting processes always remains explicit.
 
 ## Highlights
 
-- Restore the last-opened agent workspace while keeping it stopped after an app
+- Restore the last-opened workspace while keeping its items stopped after an app
   restart. Terminal output remains available while switching workspaces during
   the current app session.
-- Use the agent terminal as the center of the workbench, with a resizable Git
-  inspector and a collapsible task panel bound to the same checkout.
-- Create a workspace in the project root or create an isolated sibling
-  worktree on an editable `agent/*` branch.
-- Finish a workspace with a guarded archive/merge/remove flow. Agents and
+- Navigate a three-level project, workspace, and item tree. Selecting any level
+  changes the center workbench to the matching overview or terminal.
+- Use the permanent Root workspace or create isolated sibling worktrees on
+  editable branches.
+- Add multiple Codex, Claude, or custom CLI agents to any workspace.
+- Add interactive shells or command terminals such as `npm run dev`; they start
+  immediately and keep running while navigating elsewhere in the application.
+- Remove a worktree workspace with a guarded merge/remove flow. Agents and
   checkouts must be stopped and clean; optional branch deletion is safe-only
   and disabled by default.
-- Recover from moved or deleted worktrees by rebinding or archiving the
+- Recover from moved or deleted worktrees by rebinding or removing the
   workspace instead of silently falling back to the project root.
 - Run multiple PTY-backed project tasks with explicit Start, Stop, and Restart
   actions. Manual starts use the active workspace checkout; auto-start tasks
@@ -107,9 +110,8 @@ checks in managed environments.
 ## Keyboard access
 
 - `Ctrl/Cmd+F` focuses the project/workspace filter.
-- `Ctrl/Cmd+Shift+N` creates an agent workspace in the selected project.
+- `Ctrl/Cmd+Shift+N` creates a worktree workspace in the selected project.
 - `Ctrl/Cmd+G` toggles the Git inspector.
-- `Ctrl/Cmd+J` toggles the task panel.
 - Control + backtick, or `F6`, focuses the interactive terminal.
 - `F11` toggles full-screen mode.
 - `Escape` closes dismissible dialogs; confirmations keep focus contained.
@@ -129,10 +131,10 @@ The persisted schema contains:
 - application preferences for appearance, editor, clone folder, AI profile,
   and the last-opened workspace.
 - `agentProfiles[]` for built-in or custom terminal CLIs.
-- `agentWorkspaces[]` binding one agent to a project checkout, with optional
-  archive and provider resume metadata.
+- `workspaces[]` binding a permanent root or optional worktree checkout to
+  nested `agents[]` and `terminals[]` definitions.
 
-Schema v5 is the active-development baseline. Exedeck normalizes the current
+Schema v6 is the active-development baseline. Exedeck normalizes the current
 configuration shape and supplies Codex and Claude profiles when no profiles
 exist; it does not promise migration compatibility with pre-release schemas.
 

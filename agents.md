@@ -19,7 +19,7 @@ Instructions for AI coding agents working on Exedeck (Electron + Vue + Vite).
 ## Repository layout (single source of truth)
 
 - `electron/main.ts` — app lifecycle, IPC handlers, auto-start logic, smoke test handshake.
-- `electron/config.ts` — schema-v5 normalization, persistent `exedeck.config.json` in `app.getPath('userData')`, and atomic save/load helpers.
+- `electron/config.ts` — schema-v6 normalization, persistent `exedeck.config.json` in `app.getPath('userData')`, and atomic save/load helpers.
 - `electron/processRuntime.ts` — shared PTY lifecycle (`node-pty`), Ctrl+C + tree kill, buffer retention, and streaming events.
 - `electron/taskManager.ts`, `electron/agentManager.ts` — task and agent adapters over the shared runtime.
 - `electron/workspaceService.ts` — serialized workspace create, rebind, finish, merge, remove, and archive coordination.
@@ -31,7 +31,7 @@ Instructions for AI coding agents working on Exedeck (Electron + Vue + Vite).
 
 ## Key renderer patterns
 
-- `src/state/store.ts` is the single source of truth for the selected project/workspace/task, stats, buffers, and listeners.
+- `src/state/store.ts` is the single source of truth for the selected project, workspace, nested item, stats, buffers, and listeners.
 - Always call `useStore().loadConfig()` from `App.vue` on mount; it hydrates buffers via `window.exedeck.taskGetBuffer` and attaches listeners once.
 - Components subscribe via props (`Sidebar`, `Toolbar`, `TerminalView`, `SettingsModal`, `OnboardingWizard`) and emit events that delegate back to `useStore()` helpers.
 - The Onboarding wizard and Settings modal keep config editing centralized; persist through `useStore().saveConfig()` so selections stay in sync.
@@ -44,13 +44,13 @@ Instructions for AI coding agents working on Exedeck (Electron + Vue + Vite).
 - Keep the Chromium renderer sandbox enabled, reject non-main-frame IPC, and deny navigation, popups, and permissions by default.
 - Validate and normalize every config payload in `electron/config.ts`; treat renderer data as untrusted.
 - Task events (`task:data`, `task:status`, `task:stats`, `task:exit`) always flow from main to renderer via the bridge; maintain max buffer (≈250k chars).
-- Initial task and agent state uses bulk status snapshots. Terminal buffers are loaded lazily for the selected workspace or task; do not restore per-item startup hydration.
+- Initial task, terminal, and agent state uses bulk status snapshots. Terminal buffers are loaded lazily for the selected item; do not restore per-item startup hydration.
 
 ## Feature-specific details to respect
 
 - Auto-start only runs tasks when both project and task `autoStart` flags are true (see `startConfiguredAutoTasks`).
 - Manual task starts bind to the active workspace checkout; auto-start tasks bind to the project root.
-- Workspace metadata is persistent, but agent processes never auto-start and terminal transcripts do not survive a full app quit.
+- Every project has one normalized, non-removable Root workspace. Worktree workspaces own agent and terminal definitions. Processes never auto-start and terminal transcripts do not survive a full app quit.
 - Stats polling uses one batched `pidusage` request and one IPC event per cycle, with a recursive timeout so collections cannot overlap.
 - Buffered output persists in the main-process runtime. The renderer caches only terminals that have been opened and reloads a buffer when selected.
 - Terminal input is forwarded via `window.exedeck.taskInput`; `TerminalView` exposes `focusTerminal()`/`clearTerminal()` methods used in `Toolbar` actions.

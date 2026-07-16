@@ -1,24 +1,25 @@
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type {
-  AgentWorkspace,
   AppConfig,
-  Checkout,
   WorkspaceCreateRequest,
   WorkspaceCreateResult,
   WorkspaceFinishPreview,
   WorkspaceFinishRequest,
   WorkspaceFinishResult,
   WorkspaceRebindRequest,
+  WorkspaceConfig,
 } from '../shared/types'
 import type { AgentManager } from './agentManager'
 import type { GitService } from './gitService'
+import type { TaskManager } from './taskManager'
 
 interface WorkspaceServiceOptions {
   getConfig: () => AppConfig
   applyConfig: (config: AppConfig) => Promise<AppConfig>
   git: GitService
   agents: AgentManager
+  tasks: TaskManager
 }
 
 export class WorkspaceService {
@@ -27,47 +28,40 @@ export class WorkspaceService {
   async create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateResult> {
     const config = this.options.getConfig()
     const project = config.projects.find((item) => item.id === request.projectId)
-    const profile = config.agentProfiles.find((item) => item.id === request.profileId && item.enabled)
-    if (!project || !profile) return this.createFailure('Project or agent profile not found.')
+    if (!project) return this.createFailure('Project not found.')
 
-    let checkout: Checkout | null
-    let createdWorktree = false
-    if (request.mode === 'worktree') {
-      const branch = request.branch?.trim() ?? ''
-      const worktreePath = request.worktreePath?.trim() ?? ''
-      if (!branch || !worktreePath) return this.createFailure('A branch and worktree path are required.')
-      const result = await this.options.git.createWorktree({
-        projectId: project.id,
-        path: worktreePath,
-        branch,
-        createBranch: true,
-        ...(request.parentBranch?.trim() ? { startPoint: request.parentBranch.trim() } : {}),
-      })
-      if (!result.ok) return this.createFailure(result.output || 'The worktree could not be created.')
-      createdWorktree = true
-      checkout =
-        (await this.options.git.listCheckouts(project.id)).find(
-          (item) => path.resolve(item.path) === path.resolve(worktreePath),
-        ) ?? null
-    } else {
-      const checkoutId = request.checkoutId?.trim() || `${project.id}:root`
-      checkout = await this.options.git.resolveCheckout(checkoutId)
-    }
+    const branch = request.branch.trim()
+    const worktreePath = request.worktreePath.trim()
+    if (!branch || !worktreePath) return this.createFailure('A branch and worktree path are required.')
+    const result = await this.options.git.createWorktree({
+      projectId: project.id,
+      path: worktreePath,
+      branch,
+      createBranch: true,
+      ...(request.parentBranch?.trim() ? { startPoint: request.parentBranch.trim() } : {}),
+    })
+    if (!result.ok) return this.createFailure(result.output || 'The worktree could not be created.')
+    const checkout =
+      (await this.options.git.listCheckouts(project.id)).find(
+        (item) => path.resolve(item.path) === path.resolve(worktreePath),
+      ) ?? null
 
     if (!checkout || checkout.projectId !== project.id) {
       return this.createFailure('The requested Git checkout is unavailable.')
     }
 
-    const workspace: AgentWorkspace = {
+    const workspace: WorkspaceConfig = {
       id: `workspace-${randomUUID()}`,
       projectId: project.id,
       checkoutId: checkout.id,
-      profileId: profile.id,
-      title: request.title.trim().slice(0, 160) || `${profile.name} workspace`,
+      name: request.name.trim().slice(0, 160) || checkout.branch,
+      kind: 'worktree',
       createdAt: Date.now(),
+      agents: [],
+      terminals: [],
     }
     const branchParents = { ...project.branchParents }
-    if (request.mode === 'worktree' && request.parentBranch?.trim()) {
+    if (request.parentBranch?.trim()) {
       branchParents[checkout.branch] = request.parentBranch.trim()
     }
 
@@ -76,50 +70,54 @@ export class WorkspaceService {
         ...config,
         projects: config.projects.map((item) => (item.id === project.id ? { ...item, branchParents } : item)),
         preferences: { ...config.preferences, lastWorkspaceId: workspace.id },
-        agentWorkspaces: [...config.agentWorkspaces, workspace],
+        workspaces: [...config.workspaces, workspace],
       })
     } catch (error) {
-      if (createdWorktree) await this.options.git.removeWorktree(checkout.id)
+      await this.options.git.removeWorktree(checkout.id)
       return this.createFailure(error instanceof Error ? error.message : 'The workspace could not be saved.')
     }
 
-    const started = request.start === true ? await this.options.agents.start(workspace.id) : false
-    return { ok: true, workspace, checkout, started }
+    return { ok: true, workspace, checkout }
   }
 
-  async rebind(request: WorkspaceRebindRequest): Promise<AgentWorkspace | null> {
+  async rebind(request: WorkspaceRebindRequest): Promise<WorkspaceConfig | null> {
     const config = this.options.getConfig()
-    const workspace = config.agentWorkspaces.find((item) => item.id === request.workspaceId && !item.archivedAt)
-    if (!workspace || this.options.agents.getStatus(workspace.id).state !== 'stopped') return null
+    const workspace = config.workspaces.find((item) => item.id === request.workspaceId && item.kind === 'worktree')
+    if (!workspace || this.runningItems(workspace) > 0) return null
     const checkout = await this.options.git.resolveCheckout(request.checkoutId)
-    if (!checkout || checkout.projectId !== workspace.projectId) return null
+    if (!checkout || checkout.projectId !== workspace.projectId || checkout.isMain) return null
     const rebound = { ...workspace, checkoutId: checkout.id }
     await this.options.applyConfig({
       ...config,
       preferences: { ...config.preferences, lastWorkspaceId: rebound.id },
-      agentWorkspaces: config.agentWorkspaces.map((item) => (item.id === rebound.id ? rebound : item)),
+      workspaces: config.workspaces.map((item) => (item.id === rebound.id ? rebound : item)),
     })
     return rebound
   }
 
   async finishPreview(workspaceId: string): Promise<WorkspaceFinishPreview | null> {
     const config = this.options.getConfig()
-    const workspace = config.agentWorkspaces.find((item) => item.id === workspaceId && !item.archivedAt)
+    const workspace = config.workspaces.find((item) => item.id === workspaceId)
     if (!workspace) return null
-    const agentState = this.options.agents.getStatus(workspace.id).state
+    const runningItems = this.runningItems(workspace)
     const checkout = await this.options.git.resolveCheckout(workspace.checkoutId)
     if (!checkout) {
       return {
         workspaceId,
-        agentState,
+        runningItems,
         checkoutMissing: true,
         clean: true,
         conflicted: false,
         rootCheckout: false,
-        canArchive: agentState === 'stopped',
+        canArchive: workspace.kind === 'worktree' && runningItems === 0,
         canMerge: false,
         canRemoveWorktree: false,
-        blockers: agentState === 'stopped' ? [] : ['Stop the agent before archiving this workspace.'],
+        blockers:
+          workspace.kind === 'root'
+            ? ['The root workspace cannot be removed.']
+            : runningItems === 0
+              ? []
+              : ['Stop all workspace items before removing this workspace.'],
       }
     }
 
@@ -133,7 +131,8 @@ export class WorkspaceService {
       : undefined
     const parentStatus = parentCheckout ? await this.options.git.status(parentCheckout.id) : null
     const blockers: string[] = []
-    if (agentState !== 'stopped') blockers.push('Stop the agent before finishing this workspace.')
+    if (workspace.kind === 'root') blockers.push('The root workspace cannot be removed.')
+    if (runningItems > 0) blockers.push('Stop all workspace items before finishing this workspace.')
     if (!status.clean)
       blockers.push(conflicted ? 'Resolve merge conflicts first.' : 'Commit or stash checkout changes first.')
     if (!checkout.isMain && !parentBranch) blockers.push('No parent branch is configured for this worktree.')
@@ -143,10 +142,10 @@ export class WorkspaceService {
     if (parentCheckout?.busy) blockers.push('Stop processes using the parent checkout first.')
     if (parentStatus && !parentStatus.clean) blockers.push('The parent checkout must be clean before merging.')
 
-    const baseReady = agentState === 'stopped' && status.clean
+    const baseReady = workspace.kind === 'worktree' && runningItems === 0 && status.clean
     return {
       workspaceId,
-      agentState,
+      runningItems,
       checkout,
       checkoutMissing: false,
       clean: status.clean,
@@ -216,8 +215,7 @@ export class WorkspaceService {
     }
 
     const config = this.options.getConfig()
-    const archivedAt = Date.now()
-    const nextActive = config.agentWorkspaces.find((item) => item.id !== request.workspaceId && !item.archivedAt)
+    const nextActive = config.workspaces.find((item) => item.id !== request.workspaceId)
     try {
       await this.options.applyConfig({
         ...config,
@@ -228,9 +226,7 @@ export class WorkspaceService {
               ? (nextActive?.id ?? '')
               : config.preferences.lastWorkspaceId,
         },
-        agentWorkspaces: config.agentWorkspaces.map((item) =>
-          item.id === request.workspaceId ? { ...item, archivedAt } : item,
-        ),
+        workspaces: config.workspaces.filter((item) => item.id !== request.workspaceId),
       })
     } catch (error) {
       return this.finishFailure(
@@ -239,15 +235,21 @@ export class WorkspaceService {
         error instanceof Error ? error.message : 'The workspace could not be archived.',
       )
     }
-    completed.push('archive')
+    completed.push('remove workspace')
     return { ok: true, completed, pending: [] }
   }
 
   private createFailure(error: string): WorkspaceCreateResult {
-    return { ok: false, started: false, error }
+    return { ok: false, error }
   }
 
   private finishFailure(completed: string[], pending: string[], error: string): WorkspaceFinishResult {
     return { ok: false, completed, pending, error }
+  }
+
+  private runningItems(workspace: WorkspaceConfig): number {
+    const agents = workspace.agents.filter((agent) => this.options.agents.getStatus(agent.id).state !== 'stopped')
+    const terminals = workspace.terminals.filter((terminal) => this.options.tasks.getTaskStatus(terminal.id).running)
+    return agents.length + terminals.length
   }
 }

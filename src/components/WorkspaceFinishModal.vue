@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import type { AgentWorkspace, WorkspaceFinishPreview } from '../../shared/types'
+import type { WorkspaceConfig, WorkspaceFinishPreview } from '../../shared/types'
 import { useDialogFocus } from '../composables/useDialogFocus'
 
-const props = defineProps<{ workspace: AgentWorkspace }>()
+const props = defineProps<{ workspace: WorkspaceConfig }>()
 const emit = defineEmits<{ close: []; finished: [] }>()
 const dialogRef = ref<HTMLElement | null>(null)
 const preview = ref<WorkspaceFinishPreview | null>(null)
@@ -37,6 +37,7 @@ async function finish(): Promise<void> {
 
 onMounted(async () => {
   preview.value = await window.exedeck.workspaces.finishPreview(props.workspace.id)
+  removeWorktree.value = preview.value?.canRemoveWorktree ?? false
   busy.value = false
 })
 </script>
@@ -54,15 +55,15 @@ onMounted(async () => {
       <header class="modal-header">
         <div>
           <span class="modal-eyebrow">Guided finish</span>
-          <h2 id="finish-title">Finish {{ workspace.title }}</h2>
+          <h2 id="finish-title">Remove {{ workspace.name }}</h2>
         </div>
         <button type="button" @click="emit('close')">Cancel</button>
       </header>
       <div v-if="preview" class="workspace-finish-body">
         <dl class="finish-preview">
           <div>
-            <dt>Agent</dt>
-            <dd>{{ preview.agentState }}</dd>
+            <dt>Running items</dt>
+            <dd>{{ preview.runningItems }}</dd>
           </div>
           <div>
             <dt>Checkout</dt>
@@ -95,14 +96,14 @@ onMounted(async () => {
             ></label
           >
         </template>
-        <p v-else-if="preview.rootCheckout">Root-checkout workspaces are archived without changing Git resources.</p>
+        <p v-else-if="preview.rootCheckout">The Root workspace is permanent and cannot be removed.</p>
         <p v-else>The missing checkout can be archived without removing Git resources.</p>
         <p v-if="completed.length" class="operation-message">Completed: {{ completed.join(', ') }}</p>
         <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
       </div>
       <footer class="modal-actions">
         <button type="button" class="primary" :disabled="busy || !preview?.canArchive" @click="finish">
-          {{ preview?.rootCheckout || preview?.checkoutMissing ? 'Archive workspace' : 'Finish workspace' }}
+          Remove workspace
         </button>
       </footer>
     </section>

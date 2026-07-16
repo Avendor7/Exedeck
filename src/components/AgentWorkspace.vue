@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { AgentProfile, AgentRuntimeSnapshot, AgentWorkspace as Workspace, Checkout } from '../../shared/types'
+import type { AgentProfile, AgentRuntimeSnapshot, Checkout, WorkspaceAgent, WorkspaceConfig } from '../../shared/types'
 import TerminalView from './TerminalView.vue'
 
 const props = defineProps<{
-  workspace: Workspace
+  workspace: WorkspaceConfig
+  agent: WorkspaceAgent
   profile?: AgentProfile
   checkout: Checkout | null
   runtime: AgentRuntimeSnapshot
@@ -44,7 +45,7 @@ defineExpose({ focusTerminal: () => terminalRef.value?.focusTerminal() })
     <header class="agent-surface-header">
       <div>
         <span class="panel-eyebrow">{{ profile?.name ?? 'Agent' }}</span>
-        <h1>{{ workspace.title }}</h1>
+        <h1>{{ agent.name }}</h1>
         <p v-if="checkout">{{ checkout.branch }} · {{ checkout.path }}</p>
       </div>
       <div class="button-row">
@@ -68,7 +69,7 @@ defineExpose({ focusTerminal: () => terminalRef.value?.focusTerminal() })
     <div class="agent-terminal" :class="{ disabled: !checkout }">
       <TerminalView
         ref="terminalRef"
-        :task-id="workspace.id"
+        :task-id="agent.id"
         :buffer="buffer"
         @input="emit('input', $event)"
         @resize="emit('resize', $event)"

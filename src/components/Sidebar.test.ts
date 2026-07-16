@@ -31,8 +31,11 @@ function mountSidebar(filterText = '') {
       workspaces: [],
       selectedProjectId: project.id,
       selectedWorkspaceId: '',
+      selectedItemKind: 'workspace',
+      selectedItemId: '',
       filterText,
       getAgentRuntime: vi.fn(() => ({ state: 'stopped' as const, unread: false })),
+      getTaskRuntime: vi.fn(() => ({ running: false })),
     },
   })
 }
