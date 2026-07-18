@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Checkout, ProjectConfig } from '../../shared/types'
-import { useDialogFocus } from '../composables/useDialogFocus'
 import AppIcon from './AppIcon.vue'
+import UiButton from './ui/UiButton.vue'
+import UiDialog from './ui/UiDialog.vue'
+import UiField from './ui/UiField.vue'
 
 const props = defineProps<{ project: ProjectConfig }>()
 const emit = defineEmits<{ close: []; created: [workspaceId: string] }>()
-const dialogRef = ref<HTMLElement | null>(null)
 const name = ref('Feature workspace')
 const branch = ref('work/feature-workspace')
 const parentBranch = ref('')
 const worktreePath = ref('')
 const busy = ref(false)
 const error = ref('')
-useDialogFocus(dialogRef, () => emit('close'))
 
 const slug = computed(
   () =>
@@ -73,38 +73,29 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="modal-overlay">
-    <section
-      ref="dialogRef"
-      class="workspace-create-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="workspace-create-title"
-      tabindex="-1"
-    >
-      <header class="modal-header">
-        <div>
-          <span class="modal-eyebrow">{{ project.name }}</span>
-          <h2 id="workspace-create-title">New worktree workspace</h2>
-        </div>
-        <button type="button" class="secondary" @click="emit('close')"><AppIcon name="x" />Cancel</button>
-      </header>
-      <div class="workspace-create-body">
-        <p>
-          The Root workspace is always available. Create an isolated worktree when you need a separate branch and
-          checkout.
-        </p>
-        <label><span>Name</span><input v-model="name" type="text" autofocus /></label>
-        <label><span>Branch</span><input v-model="branch" type="text" /></label>
-        <label><span>Parent branch</span><input v-model="parentBranch" type="text" placeholder="main" /></label>
-        <label><span>Worktree path</span><input v-model="worktreePath" type="text" /></label>
-        <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
+  <UiDialog labelledby="workspace-create-title" panel-class="workspace-create-modal" @close="emit('close')">
+    <header class="modal-header">
+      <div>
+        <span class="modal-eyebrow">{{ project.name }}</span>
+        <h2 id="workspace-create-title">New worktree workspace</h2>
       </div>
-      <footer class="modal-actions">
-        <button type="button" class="primary" :disabled="!canCreate || busy" @click="create">
-          <AppIcon name="git-branch" />Create workspace
-        </button>
-      </footer>
-    </section>
-  </div>
+      <UiButton variant="secondary" @click="emit('close')"><AppIcon name="x" />Cancel</UiButton>
+    </header>
+    <div class="workspace-create-body">
+      <p>
+        The Root workspace is always available. Create an isolated worktree when you need a separate branch and
+        checkout.
+      </p>
+      <UiField label="Name"><input v-model="name" type="text" autofocus /></UiField>
+      <UiField label="Branch"><input v-model="branch" type="text" /></UiField>
+      <UiField label="Parent branch"><input v-model="parentBranch" type="text" placeholder="main" /></UiField>
+      <UiField label="Worktree path"><input v-model="worktreePath" type="text" /></UiField>
+      <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
+    </div>
+    <footer class="modal-actions">
+      <UiButton variant="primary" :disabled="!canCreate || busy" @click="create">
+        <AppIcon name="git-branch" />Create workspace
+      </UiButton>
+    </footer>
+  </UiDialog>
 </template>

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import type { WorkspaceConfig, WorkspaceFinishPreview } from '../../shared/types'
-import { useDialogFocus } from '../composables/useDialogFocus'
 import AppIcon from './AppIcon.vue'
+import UiButton from './ui/UiButton.vue'
+import UiDialog from './ui/UiDialog.vue'
+import UiField from './ui/UiField.vue'
 
 const props = defineProps<{ workspace: WorkspaceConfig }>()
 const emit = defineEmits<{ close: []; finished: [] }>()
-const dialogRef = ref<HTMLElement | null>(null)
 const preview = ref<WorkspaceFinishPreview | null>(null)
 const merge = ref(false)
 const removeWorktree = ref(false)
@@ -14,7 +15,6 @@ const deleteBranch = ref(false)
 const busy = ref(true)
 const error = ref('')
 const completed = ref<string[]>([])
-useDialogFocus(dialogRef, () => emit('close'))
 
 async function finish(): Promise<void> {
   busy.value = true
@@ -44,69 +44,57 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="modal-overlay">
-    <section
-      ref="dialogRef"
-      class="workspace-finish-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="finish-title"
-      tabindex="-1"
-    >
-      <header class="modal-header">
-        <div>
-          <span class="modal-eyebrow">Guided finish</span>
-          <h2 id="finish-title">Remove {{ workspace.name }}</h2>
-        </div>
-        <button type="button" @click="emit('close')"><AppIcon name="x" />Cancel</button>
-      </header>
-      <div v-if="preview" class="workspace-finish-body">
-        <dl class="finish-preview">
-          <div>
-            <dt>Running items</dt>
-            <dd>{{ preview.runningItems }}</dd>
-          </div>
-          <div>
-            <dt>Checkout</dt>
-            <dd>{{ preview.checkout?.path ?? 'Missing' }}</dd>
-          </div>
-          <div>
-            <dt>Working tree</dt>
-            <dd>{{ preview.checkoutMissing ? 'Unavailable' : preview.clean ? 'Clean' : 'Has changes' }}</dd>
-          </div>
-          <div v-if="preview.parentBranch">
-            <dt>Parent</dt>
-            <dd>{{ preview.parentBranch }}</dd>
-          </div>
-        </dl>
-        <p v-for="blocker in preview.blockers" :key="blocker" class="inline-error">{{ blocker }}</p>
-        <template v-if="!preview.rootCheckout && !preview.checkoutMissing">
-          <label class="inline-checkbox"
-            ><input v-model="merge" type="checkbox" :disabled="!preview.canMerge" /><span
-              >Merge into {{ preview.parentBranch || 'configured parent' }}</span
-            ></label
-          >
-          <label class="inline-checkbox"
-            ><input v-model="removeWorktree" type="checkbox" :disabled="!preview.canRemoveWorktree" /><span
-              >Remove worktree</span
-            ></label
-          >
-          <label class="inline-checkbox"
-            ><input v-model="deleteBranch" type="checkbox" :disabled="!merge || !removeWorktree" /><span
-              >Safely delete merged branch</span
-            ></label
-          >
-        </template>
-        <p v-else-if="preview.rootCheckout">The Root workspace is permanent and cannot be removed.</p>
-        <p v-else>The missing checkout can be archived without removing Git resources.</p>
-        <p v-if="completed.length" class="operation-message">Completed: {{ completed.join(', ') }}</p>
-        <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
+  <UiDialog labelledby="finish-title" panel-class="workspace-finish-modal" @close="emit('close')">
+    <header class="modal-header">
+      <div>
+        <span class="modal-eyebrow">Guided finish</span>
+        <h2 id="finish-title">Remove {{ workspace.name }}</h2>
       </div>
-      <footer class="modal-actions">
-        <button type="button" class="danger prominent-danger" :disabled="busy || !preview?.canArchive" @click="finish">
-          <AppIcon name="trash" />Remove workspace
-        </button>
-      </footer>
-    </section>
-  </div>
+      <UiButton @click="emit('close')"><AppIcon name="x" />Cancel</UiButton>
+    </header>
+    <div v-if="preview" class="workspace-finish-body">
+      <dl class="finish-preview">
+        <div>
+          <dt>Running items</dt>
+          <dd>{{ preview.runningItems }}</dd>
+        </div>
+        <div>
+          <dt>Checkout</dt>
+          <dd>{{ preview.checkout?.path ?? 'Missing' }}</dd>
+        </div>
+        <div>
+          <dt>Working tree</dt>
+          <dd>{{ preview.checkoutMissing ? 'Unavailable' : preview.clean ? 'Clean' : 'Has changes' }}</dd>
+        </div>
+        <div v-if="preview.parentBranch">
+          <dt>Parent</dt>
+          <dd>{{ preview.parentBranch }}</dd>
+        </div>
+      </dl>
+      <p v-for="blocker in preview.blockers" :key="blocker" class="inline-error">{{ blocker }}</p>
+      <template v-if="!preview.rootCheckout && !preview.checkoutMissing">
+        <UiField :inline="true">
+          <input v-model="merge" type="checkbox" :disabled="!preview.canMerge" />
+          <span>Merge into {{ preview.parentBranch || 'configured parent' }}</span>
+        </UiField>
+        <UiField :inline="true">
+          <input v-model="removeWorktree" type="checkbox" :disabled="!preview.canRemoveWorktree" />
+          <span>Remove worktree</span>
+        </UiField>
+        <UiField :inline="true">
+          <input v-model="deleteBranch" type="checkbox" :disabled="!merge || !removeWorktree" />
+          <span>Safely delete merged branch</span>
+        </UiField>
+      </template>
+      <p v-else-if="preview.rootCheckout">The Root workspace is permanent and cannot be removed.</p>
+      <p v-else>The missing checkout can be archived without removing Git resources.</p>
+      <p v-if="completed.length" class="operation-message">Completed: {{ completed.join(', ') }}</p>
+      <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
+    </div>
+    <footer class="modal-actions">
+      <UiButton variant="danger" prominent :disabled="busy || !preview?.canArchive" @click="finish">
+        <AppIcon name="trash" />Remove workspace
+      </UiButton>
+    </footer>
+  </UiDialog>
 </template>

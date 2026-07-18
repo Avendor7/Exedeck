@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { AgentRuntimeSnapshot, ProjectConfig, TaskRuntimeSnapshot, WorkspaceConfig } from '../../shared/types'
 import type { WorkspaceItemKind } from '../state/store'
 import AppIcon from './AppIcon.vue'
+import UiIconButton from './ui/UiIconButton.vue'
 
 const props = defineProps<{
   projects: ProjectConfig[]
@@ -71,16 +72,15 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
         <span class="panel-eyebrow">Navigator</span>
         <h2>Projects</h2>
       </div>
-      <button
-        type="button"
-        class="icon-button primary"
-        aria-label="New worktree workspace"
+      <UiIconButton
+        label="New worktree workspace"
+        variant="primary"
         title="New worktree workspace"
         :disabled="!selectedProjectId"
         @click="selectedProjectId && emit('createWorkspace', selectedProjectId)"
       >
         <AppIcon name="plus" />
-      </button>
+      </UiIconButton>
     </header>
     <div class="sidebar-search">
       <AppIcon name="search" />
@@ -107,14 +107,9 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
               ><small>{{ project.path }}</small></span
             >
           </button>
-          <button
-            type="button"
-            class="icon-button"
-            aria-label="Project settings"
-            @click="emit('openProjectSettings', project.id)"
-          >
+          <UiIconButton label="Project settings" @click="emit('openProjectSettings', project.id)">
             <AppIcon name="more" />
-          </button>
+          </UiIconButton>
         </div>
 
         <div v-for="workspace in workspacesFor(project.id)" :key="workspace.id" class="workspace-branch">

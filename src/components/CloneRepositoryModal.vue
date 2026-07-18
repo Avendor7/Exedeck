@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { AppPreferences } from '../../shared/types'
-import { useDialogFocus } from '../composables/useDialogFocus'
 import AppIcon from './AppIcon.vue'
+import UiButton from './ui/UiButton.vue'
+import UiDialog from './ui/UiDialog.vue'
+import UiField from './ui/UiField.vue'
 
 const props = defineProps<{ preferences: AppPreferences }>()
 const emit = defineEmits<{ close: []; cloned: [projectId: string] }>()
-const dialogRef = ref<HTMLElement | null>(null)
 const url = ref('')
 const name = ref('')
 const parentDirectory = ref(props.preferences.cloneDirectory)
 const folderName = ref('')
 const busy = ref(false)
 const error = ref('')
-useDialogFocus(dialogRef, () => emit('close'))
 
 const derivedFolderName = computed(() => {
   const repository =
@@ -73,59 +73,40 @@ async function clone(): Promise<void> {
 </script>
 
 <template>
-  <div class="modal-overlay">
-    <section
-      ref="dialogRef"
-      class="onboarding-card clone-card"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="clone-title"
-      tabindex="-1"
-    >
-      <header class="modal-header">
-        <div>
-          <span class="modal-eyebrow">Git</span>
-          <h2 id="clone-title">Clone repository</h2>
-        </div>
-        <button type="button" class="secondary" :disabled="busy" @click="emit('close')">
-          <AppIcon name="x" />Cancel
-        </button>
-      </header>
-      <div class="form-grid">
-        <label
-          ><span>Repository URL</span
-          ><input v-model="url" type="text" placeholder="git@github.com:owner/project.git" autofocus
-        /></label>
-        <label
-          ><span>Project name (optional)</span><input v-model="name" type="text" placeholder="Derived from destination"
-        /></label>
-        <label
-          ><span>Parent directory</span>
-          <div class="path-field">
-            <input v-model="parentDirectory" type="text" placeholder="/home/me/Code" /><button
-              type="button"
-              class="small"
-              @click="pickDirectory"
-            >
-              <AppIcon name="folder" />Browse
-            </button>
-          </div></label
-        >
-        <label
-          ><span>Repository folder (optional)</span
-          ><input v-model="folderName" type="text" :placeholder="derivedFolderName || 'project'"
-        /></label>
+  <UiDialog labelledby="clone-title" panel-class="onboarding-card clone-card" @close="emit('close')">
+    <header class="modal-header">
+      <div>
+        <span class="modal-eyebrow">Git</span>
+        <h2 id="clone-title">Clone repository</h2>
       </div>
-      <p class="empty-note">
-        Destination: {{ destinationPath || 'Enter a repository URL and parent directory.' }} Existing Git credentials
-        are reused.
-      </p>
-      <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
-      <footer class="confirm-actions">
-        <button type="button" class="primary" :disabled="!canClone" @click="clone">
-          <AppIcon :name="busy ? 'refresh' : 'git-clone'" />{{ busy ? 'Cloning…' : 'Clone and add project' }}
-        </button>
-      </footer>
-    </section>
-  </div>
+      <UiButton variant="secondary" :disabled="busy" @click="emit('close')"> <AppIcon name="x" />Cancel </UiButton>
+    </header>
+    <div class="form-grid">
+      <UiField label="Repository URL">
+        <input v-model="url" type="text" placeholder="git@github.com:owner/project.git" autofocus />
+      </UiField>
+      <UiField label="Project name (optional)">
+        <input v-model="name" type="text" placeholder="Derived from destination" />
+      </UiField>
+      <UiField label="Parent directory">
+        <div class="path-field">
+          <input v-model="parentDirectory" type="text" placeholder="/home/me/Code" />
+          <UiButton size="small" @click="pickDirectory"> <AppIcon name="folder" />Browse </UiButton>
+        </div>
+      </UiField>
+      <UiField label="Repository folder (optional)">
+        <input v-model="folderName" type="text" :placeholder="derivedFolderName || 'project'" />
+      </UiField>
+    </div>
+    <p class="empty-note">
+      Destination: {{ destinationPath || 'Enter a repository URL and parent directory.' }} Existing Git credentials are
+      reused.
+    </p>
+    <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
+    <footer class="confirm-actions">
+      <UiButton variant="primary" :disabled="!canClone" @click="clone">
+        <AppIcon :name="busy ? 'refresh' : 'git-clone'" />{{ busy ? 'Cloning…' : 'Clone and add project' }}
+      </UiButton>
+    </footer>
+  </UiDialog>
 </template>

@@ -15,6 +15,10 @@ import Sidebar from './components/Sidebar.vue'
 import TerminalView from './components/TerminalView.vue'
 import WorkspaceCreateModal from './components/WorkspaceCreateModal.vue'
 import WorkspaceFinishModal from './components/WorkspaceFinishModal.vue'
+import UiButton from './components/ui/UiButton.vue'
+import UiDialog from './components/ui/UiDialog.vue'
+import UiField from './components/ui/UiField.vue'
+import UiIconButton from './components/ui/UiIconButton.vue'
 
 const store = useStore()
 const {
@@ -478,7 +482,7 @@ async function openGitWorkspace(): Promise<void> {
   <div v-if="lastError && config" class="error-toast" role="alert">
     <AppIcon name="alert" />
     <span>{{ lastError }}</span
-    ><button class="icon-button" aria-label="Dismiss error" @click="store.clearError"><AppIcon name="x" /></button>
+    ><UiIconButton label="Dismiss error" @click="store.clearError"><AppIcon name="x" /></UiIconButton>
   </div>
 
   <OnboardingWizard
@@ -515,67 +519,69 @@ async function openGitWorkspace(): Promise<void> {
     @finished="onWorkspaceFinished"
   />
 
-  <div v-if="itemModal && config" class="modal-overlay">
-    <section class="workspace-rebind-modal" role="dialog" aria-modal="true">
-      <header class="modal-header">
-        <div>
-          <span class="modal-eyebrow">Workspace item</span>
-          <h2>Add {{ itemModal }}</h2>
-        </div>
-      </header>
-      <label><span>Name</span><input v-model="itemName" type="text" autofocus /></label>
-      <label v-if="itemModal === 'agent'"
-        ><span>CLI tool</span
-        ><select v-model="itemProfileId">
-          <option
-            v-for="item in config.agentProfiles.filter((profile) => profile.enabled)"
-            :key="item.id"
-            :value="item.id"
-          >
-            {{ item.name }} ({{ item.command }})
-          </option>
-        </select></label
-      >
-      <label v-else
-        ><span>Command (optional)</span><input v-model="itemCommand" type="text" placeholder="npm run dev" /><small
-          >Leave empty for an interactive shell.</small
-        ></label
-      >
-      <footer class="modal-actions">
-        <button @click="itemModal = null">Cancel</button
-        ><button
-          class="primary"
-          :disabled="!itemName.trim() || (itemModal === 'agent' && !itemProfileId)"
-          @click="addWorkspaceItem"
+  <UiDialog
+    v-if="itemModal && config"
+    labelledby="workspace-item-title"
+    panel-class="workspace-rebind-modal"
+    @close="itemModal = null"
+  >
+    <header class="modal-header">
+      <div>
+        <span class="modal-eyebrow">Workspace item</span>
+        <h2 id="workspace-item-title">Add {{ itemModal }}</h2>
+      </div>
+    </header>
+    <UiField label="Name"><input v-model="itemName" type="text" autofocus /></UiField>
+    <UiField v-if="itemModal === 'agent'" label="CLI tool">
+      <select v-model="itemProfileId">
+        <option
+          v-for="item in config.agentProfiles.filter((profile) => profile.enabled)"
+          :key="item.id"
+          :value="item.id"
         >
-          <AppIcon name="plus" />Add {{ itemModal }}
-        </button>
-      </footer>
-    </section>
-  </div>
-
-  <div v-if="rebindOpen && workspace" class="modal-overlay">
-    <section class="workspace-rebind-modal" role="dialog" aria-modal="true">
-      <header class="modal-header">
-        <div>
-          <span class="modal-eyebrow">Recover workspace</span>
-          <h2>Rebind checkout</h2>
-        </div>
-      </header>
-      <label
-        ><span>Available checkout</span
-        ><select v-model="rebindCheckoutId">
-          <option v-for="item in projectCheckouts" :key="item.id" :value="item.id">
-            {{ item.branch }} — {{ item.path }}
-          </option>
-        </select></label
+          {{ item.name }} ({{ item.command }})
+        </option>
+      </select>
+    </UiField>
+    <UiField v-else label="Command (optional)" hint="Leave empty for an interactive shell.">
+      <input v-model="itemCommand" type="text" placeholder="npm run dev" />
+    </UiField>
+    <footer class="modal-actions">
+      <UiButton @click="itemModal = null">Cancel</UiButton>
+      <UiButton
+        variant="primary"
+        :disabled="!itemName.trim() || (itemModal === 'agent' && !itemProfileId)"
+        @click="addWorkspaceItem"
       >
-      <footer class="modal-actions">
-        <button @click="rebindOpen = false">Cancel</button
-        ><button class="primary" :disabled="!rebindCheckoutId" @click="rebind">
-          <AppIcon name="git-branch" />Rebind
-        </button>
-      </footer>
-    </section>
-  </div>
+        <AppIcon name="plus" />Add {{ itemModal }}
+      </UiButton>
+    </footer>
+  </UiDialog>
+
+  <UiDialog
+    v-if="rebindOpen && workspace"
+    labelledby="workspace-rebind-title"
+    panel-class="workspace-rebind-modal"
+    @close="rebindOpen = false"
+  >
+    <header class="modal-header">
+      <div>
+        <span class="modal-eyebrow">Recover workspace</span>
+        <h2 id="workspace-rebind-title">Rebind checkout</h2>
+      </div>
+    </header>
+    <UiField label="Available checkout">
+      <select v-model="rebindCheckoutId">
+        <option v-for="item in projectCheckouts" :key="item.id" :value="item.id">
+          {{ item.branch }} — {{ item.path }}
+        </option>
+      </select>
+    </UiField>
+    <footer class="modal-actions">
+      <UiButton @click="rebindOpen = false">Cancel</UiButton>
+      <UiButton variant="primary" :disabled="!rebindCheckoutId" @click="rebind">
+        <AppIcon name="git-branch" />Rebind
+      </UiButton>
+    </footer>
+  </UiDialog>
 </template>

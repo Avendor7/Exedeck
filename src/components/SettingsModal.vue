@@ -2,8 +2,10 @@
 import { computed, nextTick, ref } from 'vue'
 import type { AppConfig, ProjectConfig, TaskConfig } from '../../shared/types'
 import { createId, formatArgs, parseArgs } from '../utils/commandArgs'
-import { useDialogFocus } from '../composables/useDialogFocus'
 import AppIcon from './AppIcon.vue'
+import UiButton from './ui/UiButton.vue'
+import UiCard from './ui/UiCard.vue'
+import UiDialog from './ui/UiDialog.vue'
 
 interface DraftTask {
   id: string
@@ -83,10 +85,7 @@ function toDraftConfig(config: AppConfig): DraftConfig {
 const draft = ref<DraftConfig>(toDraftConfig(props.config))
 const editingProjectId = ref<string>(props.selectedProjectId || draft.value.projects[0]?.id || '')
 const pendingProjectRemovalId = ref<string | null>(null)
-const dialogRef = ref<HTMLElement | null>(null)
 const confirmCancelRef = ref<HTMLButtonElement | null>(null)
-
-useDialogFocus(dialogRef, () => emit('close'))
 
 const currentProject = computed<DraftProject | null>(
   () =>
@@ -245,214 +244,202 @@ function saveDraft(): void {
 </script>
 
 <template>
-  <div class="modal-overlay">
-    <section
-      ref="dialogRef"
-      class="settings-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="settings-title"
-      tabindex="-1"
-    >
-      <header class="modal-header" :inert="Boolean(pendingProjectRemoval)">
-        <div>
-          <span class="modal-eyebrow">Workspace</span>
-          <h2 id="settings-title">Project settings</h2>
+  <UiDialog labelledby="settings-title" panel-class="settings-modal" @close="emit('close')">
+    <header class="modal-header" :inert="Boolean(pendingProjectRemoval)">
+      <div>
+        <span class="modal-eyebrow">Workspace</span>
+        <h2 id="settings-title">Project settings</h2>
+      </div>
+      <div class="modal-actions">
+        <UiButton variant="primary" @click="emit('createProject')"> <AppIcon name="plus" />Create Project </UiButton>
+        <UiButton
+          v-if="currentProject"
+          variant="danger"
+          prominent
+          class="subtle-danger"
+          @click="requestProjectRemoval(currentProject.id)"
+        >
+          <AppIcon name="trash" />Delete Project
+        </UiButton>
+        <UiButton variant="secondary" @click="emit('close')">Cancel</UiButton>
+        <UiButton variant="primary" :disabled="!canSave" @click="saveDraft"> <AppIcon name="check" />Save </UiButton>
+      </div>
+    </header>
+
+    <div class="modal-body" :inert="Boolean(pendingProjectRemoval)">
+      <aside class="settings-sidebar">
+        <div class="settings-sidebar-head">
+          <h3>Projects</h3>
+          <button type="button" class="small" @click="addProject"><AppIcon name="plus" />Add</button>
         </div>
-        <div class="modal-actions">
-          <button type="button" class="primary" @click="emit('createProject')">
-            <AppIcon name="plus" />Create Project
-          </button>
+
+        <div class="settings-project-list">
           <button
-            v-if="currentProject"
+            v-for="project in draft.projects"
+            :key="project.id"
             type="button"
-            class="danger prominent-danger subtle-danger"
-            @click="requestProjectRemoval(currentProject.id)"
+            class="settings-project-item"
+            :class="{ active: project.id === editingProjectId }"
+            @click="editingProjectId = project.id"
           >
-            <AppIcon name="trash" />Delete Project
-          </button>
-          <button type="button" class="secondary" @click="emit('close')">Cancel</button>
-          <button type="button" class="primary" :disabled="!canSave" @click="saveDraft">
-            <AppIcon name="check" />Save
+            <span>{{ project.name || 'Untitled project' }}</span>
+            <span class="pill">{{ project.tasks.length }} tasks</span>
           </button>
         </div>
-      </header>
+      </aside>
 
-      <div class="modal-body" :inert="Boolean(pendingProjectRemoval)">
-        <aside class="settings-sidebar">
-          <div class="settings-sidebar-head">
-            <h3>Projects</h3>
-            <button type="button" class="small" @click="addProject"><AppIcon name="plus" />Add</button>
-          </div>
+      <section v-if="currentProject" class="settings-editor">
+        <div class="task-editor-head">
+          <h3>Application</h3>
+        </div>
+        <div class="form-grid settings-global-grid">
+          <label>
+            <span>Appearance</span>
+            <select v-model="draft.preferences.appearance">
+              <option value="system">System</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+          <label>
+            <span>Editor command</span>
+            <input v-model="draft.preferences.editorCommand" type="text" placeholder="code" />
+          </label>
+          <label>
+            <span>Default clone directory</span>
+            <input v-model="draft.preferences.cloneDirectory" type="text" placeholder="/home/me/Code" />
+          </label>
+          <label>
+            <span>AI Git profile</span>
+            <select v-model="draft.preferences.aiProfileId">
+              <option v-for="profile in draft.agentProfiles" :key="profile.id" :value="profile.id">
+                {{ profile.name }}
+              </option>
+            </select>
+          </label>
+        </div>
 
-          <div class="settings-project-list">
-            <button
-              v-for="project in draft.projects"
-              :key="project.id"
-              type="button"
-              class="settings-project-item"
-              :class="{ active: project.id === editingProjectId }"
-              @click="editingProjectId = project.id"
-            >
-              <span>{{ project.name || 'Untitled project' }}</span>
-              <span class="pill">{{ project.tasks.length }} tasks</span>
-            </button>
-          </div>
-        </aside>
-
-        <section v-if="currentProject" class="settings-editor">
-          <div class="task-editor-head">
-            <h3>Application</h3>
-          </div>
-          <div class="form-grid settings-global-grid">
-            <label>
-              <span>Appearance</span>
-              <select v-model="draft.preferences.appearance">
-                <option value="system">System</option>
-                <option value="dark">Dark</option>
-                <option value="light">Light</option>
-              </select>
-            </label>
-            <label>
-              <span>Editor command</span>
-              <input v-model="draft.preferences.editorCommand" type="text" placeholder="code" />
-            </label>
-            <label>
-              <span>Default clone directory</span>
-              <input v-model="draft.preferences.cloneDirectory" type="text" placeholder="/home/me/Code" />
-            </label>
-            <label>
-              <span>AI Git profile</span>
-              <select v-model="draft.preferences.aiProfileId">
-                <option v-for="profile in draft.agentProfiles" :key="profile.id" :value="profile.id">
-                  {{ profile.name }}
-                </option>
-              </select>
-            </label>
-          </div>
-
-          <div class="task-editor-head">
-            <h3>Agent tools</h3>
-            <button type="button" class="small" @click="addAgentProfile"><AppIcon name="plus" />Add Custom</button>
-          </div>
-          <div class="agent-profile-grid">
-            <article v-for="profile in draft.agentProfiles" :key="profile.id" class="task-card compact-card">
-              <div class="task-grid">
-                <label><span>Name</span><input v-model="profile.name" type="text" /></label>
-                <label><span>Command</span><input v-model="profile.command" type="text" /></label>
-                <label
-                  ><span>Arguments</span
-                  ><input
-                    :value="formatArgs(profile.args)"
-                    type="text"
-                    @input="profile.args = parseArgs(($event.target as HTMLInputElement).value)"
-                /></label>
-                <label class="inline-checkbox"
-                  ><input v-model="profile.enabled" type="checkbox" /><span>Enabled</span></label
-                >
-              </div>
-              <button
-                v-if="profile.tool === 'custom'"
-                type="button"
-                class="danger small"
-                :disabled="
-                  draft.workspaces.some((workspace) => workspace.agents.some((agent) => agent.profileId === profile.id))
-                "
-                @click="removeAgentProfile(profile.id)"
+        <div class="task-editor-head">
+          <h3>Agent tools</h3>
+          <button type="button" class="small" @click="addAgentProfile"><AppIcon name="plus" />Add Custom</button>
+        </div>
+        <div class="agent-profile-grid">
+          <UiCard v-for="profile in draft.agentProfiles" :key="profile.id" class="task-card compact-card">
+            <div class="task-grid">
+              <label><span>Name</span><input v-model="profile.name" type="text" /></label>
+              <label><span>Command</span><input v-model="profile.command" type="text" /></label>
+              <label
+                ><span>Arguments</span
+                ><input
+                  :value="formatArgs(profile.args)"
+                  type="text"
+                  @input="profile.args = parseArgs(($event.target as HTMLInputElement).value)"
+              /></label>
+              <label class="inline-checkbox"
+                ><input v-model="profile.enabled" type="checkbox" /><span>Enabled</span></label
               >
+            </div>
+            <button
+              v-if="profile.tool === 'custom'"
+              type="button"
+              class="danger small"
+              :disabled="
+                draft.workspaces.some((workspace) => workspace.agents.some((agent) => agent.profileId === profile.id))
+              "
+              @click="removeAgentProfile(profile.id)"
+            >
+              <AppIcon name="trash" />Remove
+            </button>
+          </UiCard>
+        </div>
+
+        <div class="form-grid">
+          <label>
+            <span>Project name</span>
+            <input v-model="currentProject.name" type="text" />
+          </label>
+
+          <label>
+            <span>Project path</span>
+            <div class="path-field">
+              <input v-model="currentProject.path" type="text" />
+              <button type="button" class="small" @click="pickProjectPath"><AppIcon name="folder" />Browse</button>
+            </div>
+          </label>
+
+          <label class="inline-checkbox">
+            <input v-model="currentProject.autoStart" type="checkbox" />
+            <span>Auto-start this project on app launch</span>
+          </label>
+        </div>
+
+        <div class="task-editor-head">
+          <h3>Tasks</h3>
+          <button type="button" class="small" @click="addTask"><AppIcon name="plus" />Add Task</button>
+        </div>
+
+        <div class="task-editor-list">
+          <UiCard v-for="task in currentProject.tasks" :key="task.id" class="task-card">
+            <div class="task-card-head">
+              <strong>{{ task.name || 'Task' }}</strong>
+              <button type="button" class="danger small" @click="removeTask(task.id)">
                 <AppIcon name="trash" />Remove
               </button>
-            </article>
-          </div>
+            </div>
 
-          <div class="form-grid">
-            <label>
-              <span>Project name</span>
-              <input v-model="currentProject.name" type="text" />
-            </label>
+            <div class="task-grid">
+              <label>
+                <span>Name</span>
+                <input v-model="task.name" type="text" />
+              </label>
 
-            <label>
-              <span>Project path</span>
-              <div class="path-field">
-                <input v-model="currentProject.path" type="text" />
-                <button type="button" class="small" @click="pickProjectPath"><AppIcon name="folder" />Browse</button>
-              </div>
-            </label>
+              <label>
+                <span>Command</span>
+                <input v-model="task.command" type="text" placeholder="npm" />
+              </label>
 
-            <label class="inline-checkbox">
-              <input v-model="currentProject.autoStart" type="checkbox" />
-              <span>Auto-start this project on app launch</span>
-            </label>
-          </div>
+              <label>
+                <span>Args</span>
+                <input v-model="task.argsText" type="text" placeholder="run dev" />
+              </label>
 
-          <div class="task-editor-head">
-            <h3>Tasks</h3>
-            <button type="button" class="small" @click="addTask"><AppIcon name="plus" />Add Task</button>
-          </div>
+              <label class="inline-checkbox">
+                <input v-model="task.autoStart" type="checkbox" />
+                <span>Auto-start this task</span>
+              </label>
+            </div>
+          </UiCard>
 
-          <div class="task-editor-list">
-            <article v-for="task in currentProject.tasks" :key="task.id" class="task-card">
-              <div class="task-card-head">
-                <strong>{{ task.name || 'Task' }}</strong>
-                <button type="button" class="danger small" @click="removeTask(task.id)">
-                  <AppIcon name="trash" />Remove
-                </button>
-              </div>
+          <p v-if="currentProject.tasks.length === 0" class="empty-note">
+            No tasks configured. Add one to run commands for this project.
+          </p>
+        </div>
+      </section>
 
-              <div class="task-grid">
-                <label>
-                  <span>Name</span>
-                  <input v-model="task.name" type="text" />
-                </label>
+      <section v-else class="settings-editor">
+        <p class="empty-note">Add a project to begin configuring commands.</p>
+      </section>
+    </div>
 
-                <label>
-                  <span>Command</span>
-                  <input v-model="task.command" type="text" placeholder="npm" />
-                </label>
-
-                <label>
-                  <span>Args</span>
-                  <input v-model="task.argsText" type="text" placeholder="run dev" />
-                </label>
-
-                <label class="inline-checkbox">
-                  <input v-model="task.autoStart" type="checkbox" />
-                  <span>Auto-start this task</span>
-                </label>
-              </div>
-            </article>
-
-            <p v-if="currentProject.tasks.length === 0" class="empty-note">
-              No tasks configured. Add one to run commands for this project.
+    <div v-if="pendingProjectRemoval" class="confirm-overlay" @keydown.esc.stop.prevent="cancelProjectRemoval">
+      <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-project-title">
+        <div class="confirm-dialog-intro">
+          <span class="confirm-dialog-icon"><AppIcon name="alert" :size="22" /></span>
+          <div>
+            <h2 id="delete-project-title">Delete project?</h2>
+            <p>
+              This will remove <strong>{{ pendingProjectRemoval.name || 'Untitled project' }}</strong> and all of its
+              tasks from this configuration.
             </p>
           </div>
-        </section>
-
-        <section v-else class="settings-editor">
-          <p class="empty-note">Add a project to begin configuring commands.</p>
-        </section>
-      </div>
-
-      <div v-if="pendingProjectRemoval" class="confirm-overlay" @keydown.esc.stop.prevent="cancelProjectRemoval">
-        <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-project-title">
-          <div class="confirm-dialog-intro">
-            <span class="confirm-dialog-icon"><AppIcon name="alert" :size="22" /></span>
-            <div>
-              <h2 id="delete-project-title">Delete project?</h2>
-              <p>
-                This will remove <strong>{{ pendingProjectRemoval.name || 'Untitled project' }}</strong> and all of its
-                tasks from this configuration.
-              </p>
-            </div>
-          </div>
-          <div class="confirm-actions">
-            <button ref="confirmCancelRef" type="button" class="secondary" @click="cancelProjectRemoval">Cancel</button>
-            <button type="button" class="danger prominent-danger" @click="confirmProjectRemoval">
-              <AppIcon name="trash" />Delete Project
-            </button>
-          </div>
+        </div>
+        <div class="confirm-actions">
+          <button ref="confirmCancelRef" type="button" class="secondary" @click="cancelProjectRemoval">Cancel</button>
+          <button type="button" class="danger prominent-danger" @click="confirmProjectRemoval">
+            <AppIcon name="trash" />Delete Project
+          </button>
         </div>
       </div>
-    </section>
-  </div>
+    </div>
+  </UiDialog>
 </template>

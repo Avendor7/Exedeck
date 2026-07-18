@@ -7,8 +7,9 @@ import type {
   ProjectCreateStatus,
   ProjectCreateStatusEvent,
 } from '../../shared/types'
-import { useDialogFocus } from '../composables/useDialogFocus'
 import AppIcon from './AppIcon.vue'
+import UiButton from './ui/UiButton.vue'
+import UiDialog from './ui/UiDialog.vue'
 
 const emit = defineEmits<{
   close: []
@@ -26,7 +27,6 @@ const status = ref<ProjectCreateStatus | null>(null)
 const logs = ref('')
 const inputLine = ref('')
 const localError = ref('')
-const dialogRef = ref<HTMLElement | null>(null)
 
 function requestClose(): void {
   if (isRunning.value) {
@@ -35,8 +35,6 @@ function requestClose(): void {
   }
   emit('close')
 }
-
-useDialogFocus(dialogRef, requestClose)
 
 const unsubscribers: Array<() => void> = []
 function sanitizeTerminalChunk(chunk: string): string {
@@ -225,34 +223,65 @@ async function sendInput(): Promise<void> {
 </script>
 
 <template>
-  <div class="modal-overlay">
-    <section
-      ref="dialogRef"
-      class="new-project-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="new-project-title"
-      tabindex="-1"
-    >
-      <header class="modal-header">
-        <div>
-          <span class="modal-eyebrow">Scaffolding</span>
-          <h2 id="new-project-title">Create a new project</h2>
-        </div>
-        <div class="modal-actions">
-          <span class="pill" :class="`state-${status?.state ?? 'idle'}`" role="status">{{ statusLabel }}</span>
-          <button type="button" class="secondary" @click="requestClose"><AppIcon name="x" />Close</button>
-        </div>
-      </header>
+  <UiDialog labelledby="new-project-title" panel-class="new-project-modal" @close="requestClose">
+    <header class="modal-header">
+      <div>
+        <span class="modal-eyebrow">Scaffolding</span>
+        <h2 id="new-project-title">Create a new project</h2>
+      </div>
+      <div class="modal-actions">
+        <span class="pill" :class="`state-${status?.state ?? 'idle'}`" role="status">{{ statusLabel }}</span>
+        <UiButton variant="secondary" @click="requestClose"><AppIcon name="x" />Close</UiButton>
+      </div>
+    </header>
 
-      <div class="new-project-body">
-        <section class="new-project-form">
+    <div class="new-project-body">
+      <section class="new-project-form">
+        <label>
+          <span>Framework</span>
+          <span class="select-field">
+            <select v-model="framework" :disabled="isRunning">
+              <option value="laravel">Laravel</option>
+              <option value="adonisjs">AdonisJS</option>
+            </select>
+            <span class="select-indicator" aria-hidden="true">
+              <svg viewBox="0 0 20 20"><path d="m4.5 7 5.5 5.5L15.5 7" /></svg>
+            </span>
+          </span>
+        </label>
+
+        <label>
+          <span>Project name</span>
+          <input
+            v-model="projectName"
+            type="text"
+            placeholder="my-app"
+            autocomplete="off"
+            autofocus
+            :disabled="isRunning"
+          />
+        </label>
+
+        <label>
+          <span>Directory</span>
+          <div class="path-field">
+            <input v-model="projectDirectory" type="text" :disabled="isRunning" />
+            <button type="button" class="small" :disabled="isRunning" @click="pickDirectory">
+              <AppIcon name="folder" />Browse
+            </button>
+          </div>
+        </label>
+
+        <template v-if="isLaravel">
           <label>
-            <span>Framework</span>
+            <span>Starter kit</span>
             <span class="select-field">
-              <select v-model="framework" :disabled="isRunning">
-                <option value="laravel">Laravel</option>
-                <option value="adonisjs">AdonisJS</option>
+              <select v-model="laravelStarterKit" :disabled="isRunning">
+                <option value="none">None</option>
+                <option value="react">React</option>
+                <option value="vue">Vue</option>
+                <option value="svelte">Svelte</option>
+                <option value="livewire">Livewire</option>
               </select>
               <span class="select-indicator" aria-hidden="true">
                 <svg viewBox="0 0 20 20"><path d="m4.5 7 5.5 5.5L15.5 7" /></svg>
@@ -261,102 +290,62 @@ async function sendInput(): Promise<void> {
           </label>
 
           <label>
-            <span>Project name</span>
-            <input
-              v-model="projectName"
-              type="text"
-              placeholder="my-app"
-              autocomplete="off"
-              autofocus
-              :disabled="isRunning"
-            />
+            <span>Authentication</span>
+            <span class="select-field">
+              <select v-model="laravelAuthMode" :disabled="isRunning">
+                <option value="default">Default</option>
+                <option value="no-authentication">No authentication</option>
+                <option value="workos">WorkOS</option>
+              </select>
+              <span class="select-indicator" aria-hidden="true">
+                <svg viewBox="0 0 20 20"><path d="m4.5 7 5.5 5.5L15.5 7" /></svg>
+              </span>
+            </span>
           </label>
 
-          <label>
-            <span>Directory</span>
-            <div class="path-field">
-              <input v-model="projectDirectory" type="text" :disabled="isRunning" />
-              <button type="button" class="small" :disabled="isRunning" @click="pickDirectory">
-                <AppIcon name="folder" />Browse
-              </button>
-            </div>
+          <label class="inline-checkbox">
+            <input v-model="laravelBoost" type="checkbox" :disabled="isRunning" />
+            <span>Install Laravel Boost</span>
           </label>
+          <p class="empty-note">
+            SQLite is always configured and npm dependencies are installed and built automatically.
+          </p>
+        </template>
 
-          <template v-if="isLaravel">
-            <label>
-              <span>Starter kit</span>
-              <span class="select-field">
-                <select v-model="laravelStarterKit" :disabled="isRunning">
-                  <option value="none">None</option>
-                  <option value="react">React</option>
-                  <option value="vue">Vue</option>
-                  <option value="svelte">Svelte</option>
-                  <option value="livewire">Livewire</option>
-                </select>
-                <span class="select-indicator" aria-hidden="true">
-                  <svg viewBox="0 0 20 20"><path d="m4.5 7 5.5 5.5L15.5 7" /></svg>
-                </span>
-              </span>
-            </label>
+        <div class="wizard-actions">
+          <UiButton variant="primary" :disabled="!canStart" @click="startCreate">
+            <AppIcon name="sparkles" />Start Scaffold
+          </UiButton>
+          <UiButton variant="danger" :disabled="!isRunning" @click="cancelCreate">
+            <AppIcon name="square" />Cancel process
+          </UiButton>
+        </div>
 
-            <label>
-              <span>Authentication</span>
-              <span class="select-field">
-                <select v-model="laravelAuthMode" :disabled="isRunning">
-                  <option value="default">Default</option>
-                  <option value="no-authentication">No authentication</option>
-                  <option value="workos">WorkOS</option>
-                </select>
-                <span class="select-indicator" aria-hidden="true">
-                  <svg viewBox="0 0 20 20"><path d="m4.5 7 5.5 5.5L15.5 7" /></svg>
-                </span>
-              </span>
-            </label>
+        <p v-if="status?.fallbackUsed" class="empty-note">Primary scaffold failed and fallback command was used.</p>
+        <p v-if="localError" class="error-note" role="alert">{{ localError }}</p>
+      </section>
 
-            <label class="inline-checkbox">
-              <input v-model="laravelBoost" type="checkbox" :disabled="isRunning" />
-              <span>Install Laravel Boost</span>
-            </label>
-            <p class="empty-note">
-              SQLite is always configured and npm dependencies are installed and built automatically.
-            </p>
-          </template>
+      <section class="new-project-output">
+        <h3>Scaffold Output</h3>
+        <pre class="provision-log" role="log" aria-live="polite" aria-label="Scaffold output">{{
+          logs || 'No output yet.'
+        }}</pre>
 
-          <div class="wizard-actions">
-            <button type="button" class="primary" :disabled="!canStart" @click="startCreate">
-              <AppIcon name="sparkles" />Start Scaffold
-            </button>
-            <button type="button" class="danger" :disabled="!isRunning" @click="cancelCreate">
-              <AppIcon name="square" />Cancel process
-            </button>
-          </div>
-
-          <p v-if="status?.fallbackUsed" class="empty-note">Primary scaffold failed and fallback command was used.</p>
-          <p v-if="localError" class="error-note" role="alert">{{ localError }}</p>
-        </section>
-
-        <section class="new-project-output">
-          <h3>Scaffold Output</h3>
-          <pre class="provision-log" role="log" aria-live="polite" aria-label="Scaffold output">{{
-            logs || 'No output yet.'
-          }}</pre>
-
-          <div class="provision-input-row">
-            <label class="sr-only" for="scaffold-input">Input for the scaffold process</label>
-            <input
-              id="scaffold-input"
-              v-model="inputLine"
-              type="text"
-              placeholder="Send input to scaffold process..."
-              :disabled="!isRunning"
-              @keyup.enter="sendInput"
-            />
-            <button type="button" class="small" :disabled="!isRunning || !inputLine.trim()" @click="sendInput">
-              <AppIcon name="arrow-up" />Send
-            </button>
-          </div>
-        </section>
-      </div>
-    </section>
-  </div>
+        <div class="provision-input-row">
+          <label class="sr-only" for="scaffold-input">Input for the scaffold process</label>
+          <input
+            id="scaffold-input"
+            v-model="inputLine"
+            type="text"
+            placeholder="Send input to scaffold process..."
+            :disabled="!isRunning"
+            @keyup.enter="sendInput"
+          />
+          <UiButton size="small" :disabled="!isRunning || !inputLine.trim()" @click="sendInput">
+            <AppIcon name="arrow-up" />Send
+          </UiButton>
+        </div>
+      </section>
+    </div>
+  </UiDialog>
 </template>

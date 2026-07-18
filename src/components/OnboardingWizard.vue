@@ -2,16 +2,16 @@
 import { computed, ref } from 'vue'
 import type { AppConfig, ProjectConfig } from '../../shared/types'
 import { createId } from '../utils/commandArgs'
-import { useDialogFocus } from '../composables/useDialogFocus'
 import AppIcon from './AppIcon.vue'
+import UiButton from './ui/UiButton.vue'
+import UiDialog from './ui/UiDialog.vue'
+import UiField from './ui/UiField.vue'
 
 const props = defineProps<{ config: AppConfig }>()
 const emit = defineEmits<{ complete: [config: AppConfig]; clone: [] }>()
-const dialogRef = ref<HTMLElement | null>(null)
 const projectPath = ref('')
 const projectName = ref('')
 const error = ref('')
-useDialogFocus(dialogRef)
 const canSubmit = computed(() => Boolean(projectPath.value.trim()))
 
 async function pickFolder(): Promise<void> {
@@ -44,42 +44,40 @@ function submit(): void {
 </script>
 
 <template>
-  <div class="modal-overlay onboarding">
-    <section
-      ref="dialogRef"
-      class="onboarding-card first-run-card"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="onboarding-title"
-      tabindex="-1"
-    >
-      <header class="onboarding-head">
-        <div class="app-mark large">E</div>
-        <div>
-          <span class="modal-eyebrow">Welcome to Exedeck</span>
-          <h2 id="onboarding-title">Open your first project</h2>
-          <p>Agent workspaces, Git, and optional development tasks all begin with a project folder.</p>
-        </div>
-      </header>
-      <div class="first-run-actions">
-        <button type="button" class="choice-card" @click="pickFolder">
-          <span class="choice-icon"><AppIcon name="folder" :size="22" /></span
-          ><span><strong>Open Folder</strong><small>Use an existing local checkout.</small></span>
-        </button>
-        <button type="button" class="choice-card" @click="emit('clone')">
-          <span class="choice-icon"><AppIcon name="git-clone" :size="22" /></span
-          ><span><strong>Clone Repository</strong><small>Clone Git and register the new project.</small></span>
-        </button>
+  <UiDialog
+    labelledby="onboarding-title"
+    panel-class="onboarding-card first-run-card"
+    overlay-class="onboarding"
+    :close-on-escape="false"
+  >
+    <header class="onboarding-head">
+      <div class="app-mark large">E</div>
+      <div>
+        <span class="modal-eyebrow">Welcome to Exedeck</span>
+        <h2 id="onboarding-title">Open your first project</h2>
+        <p>Agent workspaces, Git, and optional development tasks all begin with a project folder.</p>
       </div>
-      <div v-if="projectPath" class="form-grid">
-        <label><span>Project name</span><input v-model="projectName" type="text" /></label
-        ><label><span>Folder</span><input :value="projectPath" readonly /></label>
-      </div>
-      <p v-if="error" class="inline-error">{{ error }}</p>
-      <footer class="onboarding-footer">
-        <span>Tasks can be added later in project settings.</span
-        ><button class="primary" :disabled="!canSubmit" @click="submit"><AppIcon name="folder" />Open Project</button>
-      </footer>
-    </section>
-  </div>
+    </header>
+    <div class="first-run-actions">
+      <UiButton class="choice-card" @click="pickFolder">
+        <span class="choice-icon"><AppIcon name="folder" :size="22" /></span
+        ><span><strong>Open Folder</strong><small>Use an existing local checkout.</small></span>
+      </UiButton>
+      <UiButton class="choice-card" @click="emit('clone')">
+        <span class="choice-icon"><AppIcon name="git-clone" :size="22" /></span
+        ><span><strong>Clone Repository</strong><small>Clone Git and register the new project.</small></span>
+      </UiButton>
+    </div>
+    <div v-if="projectPath" class="form-grid">
+      <UiField label="Project name"><input v-model="projectName" type="text" /></UiField>
+      <UiField label="Folder"><input :value="projectPath" readonly /></UiField>
+    </div>
+    <p v-if="error" class="inline-error">{{ error }}</p>
+    <footer class="onboarding-footer">
+      <span>Tasks can be added later in project settings.</span
+      ><UiButton variant="primary" :disabled="!canSubmit" @click="submit"
+        ><AppIcon name="folder" />Open Project</UiButton
+      >
+    </footer>
+  </UiDialog>
 </template>
