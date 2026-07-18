@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { AgentRuntimeSnapshot, ProjectConfig, TaskRuntimeSnapshot, WorkspaceConfig } from '../../shared/types'
 import type { WorkspaceItemKind } from '../state/store'
+import AppIcon from './AppIcon.vue'
 
 const props = defineProps<{
   projects: ProjectConfig[]
@@ -18,7 +19,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   selectProject: [projectId: string]
   selectWorkspace: [workspaceId: string]
-  selectItem: [kind: 'agent' | 'terminal' | 'task', id: string]
+  selectItem: [kind: 'git' | 'agent' | 'terminal' | 'task', id: string]
   updateFilter: [value: string]
   openProjectSettings: [projectId: string]
   createWorkspace: [projectId: string]
@@ -55,7 +56,7 @@ function selectTask(workspaceId: string, taskId: string): void {
   emit('selectItem', 'task', taskId)
 }
 
-function selectNestedItem(workspaceId: string, kind: 'agent' | 'terminal', itemId: string): void {
+function selectNestedItem(workspaceId: string, kind: 'git' | 'agent' | 'terminal', itemId: string): void {
   emit('selectWorkspace', workspaceId)
   emit('selectItem', kind, itemId)
 }
@@ -72,15 +73,17 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
       </div>
       <button
         type="button"
-        class="small primary"
+        class="icon-button primary"
         aria-label="New worktree workspace"
+        title="New worktree workspace"
         :disabled="!selectedProjectId"
         @click="selectedProjectId && emit('createWorkspace', selectedProjectId)"
       >
-        +
+        <AppIcon name="plus" />
       </button>
     </header>
     <div class="sidebar-search">
+      <AppIcon name="search" />
       <input
         ref="searchRef"
         :value="filterText"
@@ -110,7 +113,7 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
             aria-label="Project settings"
             @click="emit('openProjectSettings', project.id)"
           >
-            •••
+            <AppIcon name="more" />
           </button>
         </div>
 
@@ -120,7 +123,9 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
             :class="{ active: selectedWorkspaceId === workspace.id && selectedItemKind === 'workspace' }"
           >
             <button type="button" class="workspace-node-main" @click="emit('selectWorkspace', workspace.id)">
-              <span class="workspace-glyph">{{ workspace.kind === 'root' ? '⌂' : '⑂' }}</span>
+              <span class="workspace-glyph">
+                <AppIcon :name="workspace.kind === 'root' ? 'home' : 'git-branch'" />
+              </span>
               <span
                 ><strong>{{ workspace.name }}</strong
                 ><small>{{ workspace.kind === 'root' ? 'project checkout' : 'worktree' }}</small></span
@@ -133,7 +138,7 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
                 :aria-label="`Add agent to ${workspace.name}`"
                 @click="emit('createAgent', workspace.id)"
               >
-                A
+                <AppIcon name="bot" />
               </button>
               <button
                 type="button"
@@ -141,21 +146,34 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
                 :aria-label="`Add terminal to ${workspace.name}`"
                 @click="emit('createTerminal', workspace.id)"
               >
-                &gt;_
+                <AppIcon name="terminal" />
               </button>
               <button
                 v-if="workspace.kind === 'worktree'"
                 type="button"
+                class="danger-icon"
                 title="Remove workspace"
                 :aria-label="`Remove ${workspace.name}`"
                 @click="emit('removeWorkspace', workspace.id)"
               >
-                ×
+                <AppIcon name="trash" />
               </button>
             </div>
           </div>
 
           <div class="workspace-children">
+            <button
+              type="button"
+              class="workspace-item"
+              :class="{
+                active:
+                  selectedWorkspaceId === workspace.id && selectedItemKind === 'git' && selectedItemId === workspace.id,
+              }"
+              @click="selectNestedItem(workspace.id, 'git', workspace.id)"
+            >
+              <span class="workspace-item-icon"><AppIcon name="git-branch" /></span>
+              <span><strong>Git</strong><small>changes, commits, and branches</small></span>
+            </button>
             <div v-for="agent in workspace.agents" :key="agent.id" class="workspace-item-wrap">
               <button
                 type="button"
@@ -175,7 +193,7 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
                 :aria-label="`Remove ${agent.name}`"
                 @click="emit('removeItem', 'agent', agent.id)"
               >
-                ×
+                <AppIcon name="trash" />
               </button>
             </div>
             <div v-for="terminal in workspace.terminals" :key="terminal.id" class="workspace-item-wrap">
@@ -197,7 +215,7 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
                 :aria-label="`Remove ${terminal.name}`"
                 @click="emit('removeItem', 'terminal', terminal.id)"
               >
-                ×
+                <AppIcon name="trash" />
               </button>
             </div>
             <button
@@ -229,8 +247,8 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     </nav>
 
     <footer class="sidebar-actions">
-      <button type="button" @click="emit('createProject')">New application</button>
-      <button type="button" @click="emit('cloneProject')">Clone repository</button>
+      <button type="button" @click="emit('createProject')"><AppIcon name="plus" />New application</button>
+      <button type="button" @click="emit('cloneProject')"><AppIcon name="git-clone" />Clone repository</button>
     </footer>
   </aside>
 </template>

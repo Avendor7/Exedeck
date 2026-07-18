@@ -3,6 +3,7 @@ import { computed, nextTick, ref } from 'vue'
 import type { AppConfig, ProjectConfig, TaskConfig } from '../../shared/types'
 import { createId, formatArgs, parseArgs } from '../utils/commandArgs'
 import { useDialogFocus } from '../composables/useDialogFocus'
+import AppIcon from './AppIcon.vue'
 
 interface DraftTask {
   id: string
@@ -259,17 +260,21 @@ function saveDraft(): void {
           <h2 id="settings-title">Project settings</h2>
         </div>
         <div class="modal-actions">
-          <button type="button" class="primary" @click="emit('createProject')">Create Project</button>
+          <button type="button" class="primary" @click="emit('createProject')">
+            <AppIcon name="plus" />Create Project
+          </button>
           <button
             v-if="currentProject"
             type="button"
-            class="secondary subtle-danger"
+            class="danger prominent-danger subtle-danger"
             @click="requestProjectRemoval(currentProject.id)"
           >
-            Delete Project
+            <AppIcon name="trash" />Delete Project
           </button>
           <button type="button" class="secondary" @click="emit('close')">Cancel</button>
-          <button type="button" class="primary" :disabled="!canSave" @click="saveDraft">Save</button>
+          <button type="button" class="primary" :disabled="!canSave" @click="saveDraft">
+            <AppIcon name="check" />Save
+          </button>
         </div>
       </header>
 
@@ -277,7 +282,7 @@ function saveDraft(): void {
         <aside class="settings-sidebar">
           <div class="settings-sidebar-head">
             <h3>Projects</h3>
-            <button type="button" class="small" @click="addProject">Add</button>
+            <button type="button" class="small" @click="addProject"><AppIcon name="plus" />Add</button>
           </div>
 
           <div class="settings-project-list">
@@ -328,7 +333,7 @@ function saveDraft(): void {
 
           <div class="task-editor-head">
             <h3>Agent tools</h3>
-            <button type="button" class="small" @click="addAgentProfile">Add Custom</button>
+            <button type="button" class="small" @click="addAgentProfile"><AppIcon name="plus" />Add Custom</button>
           </div>
           <div class="agent-profile-grid">
             <article v-for="profile in draft.agentProfiles" :key="profile.id" class="task-card compact-card">
@@ -355,7 +360,7 @@ function saveDraft(): void {
                 "
                 @click="removeAgentProfile(profile.id)"
               >
-                Remove
+                <AppIcon name="trash" />Remove
               </button>
             </article>
           </div>
@@ -370,7 +375,7 @@ function saveDraft(): void {
               <span>Project path</span>
               <div class="path-field">
                 <input v-model="currentProject.path" type="text" />
-                <button type="button" class="small" @click="pickProjectPath">Browse</button>
+                <button type="button" class="small" @click="pickProjectPath"><AppIcon name="folder" />Browse</button>
               </div>
             </label>
 
@@ -382,14 +387,16 @@ function saveDraft(): void {
 
           <div class="task-editor-head">
             <h3>Tasks</h3>
-            <button type="button" class="small" @click="addTask">Add Task</button>
+            <button type="button" class="small" @click="addTask"><AppIcon name="plus" />Add Task</button>
           </div>
 
           <div class="task-editor-list">
             <article v-for="task in currentProject.tasks" :key="task.id" class="task-card">
               <div class="task-card-head">
                 <strong>{{ task.name || 'Task' }}</strong>
-                <button type="button" class="danger small" @click="removeTask(task.id)">Remove</button>
+                <button type="button" class="danger small" @click="removeTask(task.id)">
+                  <AppIcon name="trash" />Remove
+                </button>
               </div>
 
               <div class="task-grid">
@@ -428,14 +435,21 @@ function saveDraft(): void {
 
       <div v-if="pendingProjectRemoval" class="confirm-overlay" @keydown.esc.stop.prevent="cancelProjectRemoval">
         <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-project-title">
-          <h2 id="delete-project-title">Delete project?</h2>
-          <p>
-            This will remove <strong>{{ pendingProjectRemoval.name || 'Untitled project' }}</strong> and all of its
-            tasks from this configuration.
-          </p>
+          <div class="confirm-dialog-intro">
+            <span class="confirm-dialog-icon"><AppIcon name="alert" :size="22" /></span>
+            <div>
+              <h2 id="delete-project-title">Delete project?</h2>
+              <p>
+                This will remove <strong>{{ pendingProjectRemoval.name || 'Untitled project' }}</strong> and all of its
+                tasks from this configuration.
+              </p>
+            </div>
+          </div>
           <div class="confirm-actions">
             <button ref="confirmCancelRef" type="button" class="secondary" @click="cancelProjectRemoval">Cancel</button>
-            <button type="button" class="danger" @click="confirmProjectRemoval">Delete Project</button>
+            <button type="button" class="danger prominent-danger" @click="confirmProjectRemoval">
+              <AppIcon name="trash" />Delete Project
+            </button>
           </div>
         </div>
       </div>

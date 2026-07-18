@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { AppPreferences } from '../../shared/types'
 import { useDialogFocus } from '../composables/useDialogFocus'
+import AppIcon from './AppIcon.vue'
 
 const props = defineProps<{ preferences: AppPreferences }>()
 const emit = defineEmits<{ close: []; cloned: [projectId: string] }>()
@@ -86,7 +87,9 @@ async function clone(): Promise<void> {
           <span class="modal-eyebrow">Git</span>
           <h2 id="clone-title">Clone repository</h2>
         </div>
-        <button type="button" class="secondary" :disabled="busy" @click="emit('close')">Cancel</button>
+        <button type="button" class="secondary" :disabled="busy" @click="emit('close')">
+          <AppIcon name="x" />Cancel
+        </button>
       </header>
       <div class="form-grid">
         <label
@@ -104,7 +107,7 @@ async function clone(): Promise<void> {
               class="small"
               @click="pickDirectory"
             >
-              Browse
+              <AppIcon name="folder" />Browse
             </button>
           </div></label
         >
@@ -120,7 +123,7 @@ async function clone(): Promise<void> {
       <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
       <footer class="confirm-actions">
         <button type="button" class="primary" :disabled="!canClone" @click="clone">
-          {{ busy ? 'Cloning…' : 'Clone and add project' }}
+          <AppIcon :name="busy ? 'refresh' : 'git-clone'" />{{ busy ? 'Cloning…' : 'Clone and add project' }}
         </button>
       </footer>
     </section>

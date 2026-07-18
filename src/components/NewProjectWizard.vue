@@ -8,6 +8,7 @@ import type {
   ProjectCreateStatusEvent,
 } from '../../shared/types'
 import { useDialogFocus } from '../composables/useDialogFocus'
+import AppIcon from './AppIcon.vue'
 
 const emit = defineEmits<{
   close: []
@@ -240,7 +241,7 @@ async function sendInput(): Promise<void> {
         </div>
         <div class="modal-actions">
           <span class="pill" :class="`state-${status?.state ?? 'idle'}`" role="status">{{ statusLabel }}</span>
-          <button type="button" class="secondary" @click="requestClose">Close</button>
+          <button type="button" class="secondary" @click="requestClose"><AppIcon name="x" />Close</button>
         </div>
       </header>
 
@@ -275,7 +276,9 @@ async function sendInput(): Promise<void> {
             <span>Directory</span>
             <div class="path-field">
               <input v-model="projectDirectory" type="text" :disabled="isRunning" />
-              <button type="button" class="small" :disabled="isRunning" @click="pickDirectory">Browse</button>
+              <button type="button" class="small" :disabled="isRunning" @click="pickDirectory">
+                <AppIcon name="folder" />Browse
+              </button>
             </div>
           </label>
 
@@ -320,8 +323,12 @@ async function sendInput(): Promise<void> {
           </template>
 
           <div class="wizard-actions">
-            <button type="button" class="primary" :disabled="!canStart" @click="startCreate">Start Scaffold</button>
-            <button type="button" class="danger" :disabled="!isRunning" @click="cancelCreate">Cancel</button>
+            <button type="button" class="primary" :disabled="!canStart" @click="startCreate">
+              <AppIcon name="sparkles" />Start Scaffold
+            </button>
+            <button type="button" class="danger" :disabled="!isRunning" @click="cancelCreate">
+              <AppIcon name="square" />Cancel process
+            </button>
           </div>
 
           <p v-if="status?.fallbackUsed" class="empty-note">Primary scaffold failed and fallback command was used.</p>
@@ -345,7 +352,7 @@ async function sendInput(): Promise<void> {
               @keyup.enter="sendInput"
             />
             <button type="button" class="small" :disabled="!isRunning || !inputLine.trim()" @click="sendInput">
-              Send
+              <AppIcon name="arrow-up" />Send
             </button>
           </div>
         </section>

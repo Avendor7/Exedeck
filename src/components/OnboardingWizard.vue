@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { AppConfig, ProjectConfig } from '../../shared/types'
 import { createId } from '../utils/commandArgs'
 import { useDialogFocus } from '../composables/useDialogFocus'
+import AppIcon from './AppIcon.vue'
 
 const props = defineProps<{ config: AppConfig }>()
 const emit = defineEmits<{ complete: [config: AppConfig]; clone: [] }>()
@@ -62,11 +63,11 @@ function submit(): void {
       </header>
       <div class="first-run-actions">
         <button type="button" class="choice-card" @click="pickFolder">
-          <span class="choice-icon">↗</span
+          <span class="choice-icon"><AppIcon name="folder" :size="22" /></span
           ><span><strong>Open Folder</strong><small>Use an existing local checkout.</small></span>
         </button>
         <button type="button" class="choice-card" @click="emit('clone')">
-          <span class="choice-icon">⌘</span
+          <span class="choice-icon"><AppIcon name="git-clone" :size="22" /></span
           ><span><strong>Clone Repository</strong><small>Clone Git and register the new project.</small></span>
         </button>
       </div>
@@ -77,7 +78,7 @@ function submit(): void {
       <p v-if="error" class="inline-error">{{ error }}</p>
       <footer class="onboarding-footer">
         <span>Tasks can be added later in project settings.</span
-        ><button class="primary" :disabled="!canSubmit" @click="submit">Open Project</button>
+        ><button class="primary" :disabled="!canSubmit" @click="submit"><AppIcon name="folder" />Open Project</button>
       </footer>
     </section>
   </div>

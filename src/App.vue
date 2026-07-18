@@ -4,6 +4,7 @@ import type { AppConfig, Checkout, ExternalOpenTarget } from '../shared/types'
 import { useStore } from './state/store'
 import { parseArgs } from './utils/commandArgs'
 import AgentWorkspace from './components/AgentWorkspace.vue'
+import AppIcon from './components/AppIcon.vue'
 import AppMenuBar from './components/AppMenuBar.vue'
 import CloneRepositoryModal from './components/CloneRepositoryModal.vue'
 import GitWorkspace from './components/GitWorkspace.vue'
@@ -52,7 +53,6 @@ const rebindOpen = ref(false)
 const rebindCheckoutId = ref('')
 const checkout = ref<Checkout | null>(null)
 const projectCheckouts = ref<Checkout[]>([])
-const gitOpen = ref(true)
 const itemModal = ref<'agent' | 'terminal' | null>(null)
 const itemWorkspaceId = ref('')
 const itemName = ref('')
@@ -61,6 +61,11 @@ const itemCommand = ref('')
 
 const profile = computed(() => config.value?.agentProfiles.find((item) => item.id === selectedAgent.value?.profileId))
 const agentRunning = computed(() => ['starting', 'running'].includes(selectedAgentRuntime.value.state))
+const workspaceAgentRunning = computed(() =>
+  Boolean(
+    workspace.value?.agents.some((agent) => ['starting', 'running'].includes(store.getAgentRuntime(agent.id).state)),
+  ),
+)
 
 watch(
   () => config.value?.preferences.appearance,
@@ -243,7 +248,7 @@ async function removeItem(kind: 'agent' | 'terminal', id: string): Promise<void>
   })
 }
 
-async function selectItem(kind: 'agent' | 'terminal' | 'task', id: string): Promise<void> {
+async function selectItem(kind: 'git' | 'agent' | 'terminal' | 'task', id: string): Promise<void> {
   await store.selectWorkspaceItem(kind, id)
 }
 
@@ -251,6 +256,11 @@ function clearProcess(): void {
   if (!selectedProcess.value) return
   void store.clearTaskBuffer(selectedProcess.value.id)
   terminalRef.value?.clearTerminal()
+}
+
+async function openGitWorkspace(): Promise<void> {
+  if (!workspace.value) return
+  await store.selectWorkspaceItem('git', workspace.value.id)
 }
 </script>
 
@@ -262,7 +272,7 @@ function clearProcess(): void {
       :has-agent="Boolean(selectedAgent)"
       :can-finish-workspace="workspace?.kind === 'worktree'"
       :agent-running="agentRunning"
-      :git-open="gitOpen"
+      :git-active="selectedItemKind === 'git'"
       @new-project="newProjectOpen = true"
       @clone-project="cloneOpen = true"
       @new-workspace="project && (createWorkspaceOpen = true)"
@@ -270,7 +280,7 @@ function clearProcess(): void {
       @settings="project && openProjectSettings(project.id)"
       @start-agent="store.startAgent()"
       @stop-agent="store.stopAgent()"
-      @toggle-git="gitOpen = !gitOpen"
+      @toggle-git="openGitWorkspace"
       @open-project="openExternal"
     />
     <div class="layout">
@@ -319,15 +329,6 @@ function clearProcess(): void {
               @finish="workspace.kind === 'worktree' && (finishWorkspaceOpen = true)"
               @rebind="openRebind"
             />
-            <aside v-if="gitOpen && checkout" class="git-inspector" aria-label="Git inspector">
-              <GitWorkspace
-                :project="project"
-                :config="config"
-                :active-checkout-id="checkout.id"
-                :agent-running="agentRunning"
-                @save-config="store.saveConfig"
-              />
-            </aside>
           </div>
 
           <div v-else-if="selectedProcess" class="workbench-row">
@@ -342,20 +343,20 @@ function clearProcess(): void {
                   <span class="running-pill" :class="{ active: selectedTaskRuntime.running }">{{
                     selectedTaskRuntime.running ? 'running' : 'stopped'
                   }}</span>
-                  <button class="small" @click="clearProcess">Clear</button>
+                  <button class="small" @click="clearProcess"><AppIcon name="eraser" />Clear</button>
                   <button
                     v-if="selectedTaskRuntime.running"
                     class="small"
                     @click="store.restartTask(selectedProcess.id)"
                   >
-                    Restart
+                    <AppIcon name="refresh" />Restart
                   </button>
                   <button
                     v-if="selectedTaskRuntime.running"
                     class="small danger"
                     @click="store.stopTask(selectedProcess.id)"
                   >
-                    Stop
+                    <AppIcon name="square" />Stop
                   </button>
                   <button
                     v-else
@@ -363,7 +364,7 @@ function clearProcess(): void {
                     :disabled="!checkout"
                     @click="store.startTask(selectedProcess.id)"
                   >
-                    Start
+                    <AppIcon name="play" />Start
                   </button>
                 </div>
               </header>
@@ -380,44 +381,55 @@ function clearProcess(): void {
                 CPU {{ selectedTaskStats.cpu.toFixed(1) }}% · MEM {{ selectedTaskStats.memoryMb.toFixed(0) }} MB
               </footer>
             </section>
-            <aside v-if="gitOpen && checkout" class="git-inspector" aria-label="Git inspector">
-              <GitWorkspace
-                :project="project"
-                :config="config"
-                :active-checkout-id="checkout.id"
-                :agent-running="false"
-                @save-config="store.saveConfig"
-              />
-            </aside>
           </div>
+
+          <GitWorkspace
+            v-else-if="selectedItemKind === 'git' && checkout"
+            :project="project"
+            :config="config"
+            :active-checkout-id="checkout.id"
+            :agent-running="workspaceAgentRunning"
+            @save-config="store.saveConfig"
+          />
 
           <section v-else class="project-landing workspace-landing">
             <span class="panel-eyebrow">{{ workspace.kind === 'root' ? 'Root workspace' : 'Worktree workspace' }}</span>
             <h1>{{ workspace.name }}</h1>
             <p>{{ checkout?.branch ?? 'Checkout unavailable' }} · {{ checkout?.path ?? workspace.checkoutId }}</p>
             <div class="landing-primary">
-              <button class="primary" @click="openItemModal('agent', workspace.id)">Add agent</button>
-              <button @click="openItemModal('terminal', workspace.id)">Add terminal</button>
-              <button v-if="workspace.kind === 'worktree'" @click="finishWorkspaceOpen = true">
-                Remove workspace…
+              <button class="primary" @click="openItemModal('agent', workspace.id)">
+                <AppIcon name="bot" />Add agent
+              </button>
+              <button @click="openItemModal('terminal', workspace.id)"><AppIcon name="terminal" />Add terminal</button>
+              <button v-if="workspace.kind === 'worktree'" class="danger" @click="finishWorkspaceOpen = true">
+                <AppIcon name="trash" />Remove workspace…
               </button>
             </div>
             <div class="workspace-summary-grid">
               <button v-for="agent in workspace.agents" :key="agent.id" @click="selectItem('agent', agent.id)">
-                <strong>{{ agent.name }}</strong
-                ><span>Agent · {{ store.getAgentRuntime(agent.id).state }}</span>
+                <span class="action-card-icon"><AppIcon name="bot" /></span>
+                <span class="action-card-copy"
+                  ><strong>{{ agent.name }}</strong
+                  ><span>Agent · {{ store.getAgentRuntime(agent.id).state }}</span></span
+                >
               </button>
               <button
                 v-for="terminal in workspace.terminals"
                 :key="terminal.id"
                 @click="selectItem('terminal', terminal.id)"
               >
-                <strong>{{ terminal.name }}</strong
-                ><span>Terminal · {{ store.getTaskRuntime(terminal.id).running ? 'running' : 'stopped' }}</span>
+                <span class="action-card-icon"><AppIcon name="terminal" /></span>
+                <span class="action-card-copy"
+                  ><strong>{{ terminal.name }}</strong
+                  ><span>Terminal · {{ store.getTaskRuntime(terminal.id).running ? 'running' : 'stopped' }}</span></span
+                >
               </button>
               <button v-for="task in project.tasks" :key="task.id" @click="selectItem('task', task.id)">
-                <strong>{{ task.name }}</strong
-                ><span>Project task · {{ store.getTaskRuntime(task.id).running ? 'running' : 'stopped' }}</span>
+                <span class="action-card-icon"><AppIcon name="play" /></span>
+                <span class="action-card-copy"
+                  ><strong>{{ task.name }}</strong
+                  ><span>Project task · {{ store.getTaskRuntime(task.id).running ? 'running' : 'stopped' }}</span></span
+                >
               </button>
             </div>
           </section>
@@ -428,17 +440,24 @@ function clearProcess(): void {
           <h1>{{ project.name }}</h1>
           <p>{{ project.path }}</p>
           <div class="landing-primary">
-            <button class="primary" @click="createWorkspaceOpen = true">New worktree workspace</button>
+            <button class="primary" @click="createWorkspaceOpen = true">
+              <AppIcon name="plus" />New worktree workspace
+            </button>
           </div>
           <div class="landing-actions">
             <button @click="openExternal('editor')">
-              <strong>Open in editor</strong><span>Continue in your configured editor</span>
+              <span class="action-card-icon"><AppIcon name="code" /></span>
+              <span class="action-card-copy"
+                ><strong>Open in editor</strong><span>Continue in your configured editor</span></span
+              >
             </button>
             <button @click="openExternal('terminal')">
-              <strong>Open terminal</strong><span>Shell at the project root</span>
+              <span class="action-card-icon"><AppIcon name="terminal" /></span>
+              <span class="action-card-copy"><strong>Open terminal</strong><span>Shell at the project root</span></span>
             </button>
             <button @click="openExternal('files')">
-              <strong>Show files</strong><span>Open the system file manager</span>
+              <span class="action-card-icon"><AppIcon name="folder" /></span>
+              <span class="action-card-copy"><strong>Show files</strong><span>Open the system file manager</span></span>
             </button>
           </div>
         </section>
@@ -457,8 +476,9 @@ function clearProcess(): void {
     <button class="primary" @click="initialize">Try again</button>
   </main>
   <div v-if="lastError && config" class="error-toast" role="alert">
+    <AppIcon name="alert" />
     <span>{{ lastError }}</span
-    ><button @click="store.clearError">×</button>
+    ><button class="icon-button" aria-label="Dismiss error" @click="store.clearError"><AppIcon name="x" /></button>
   </div>
 
   <OnboardingWizard
@@ -528,7 +548,7 @@ function clearProcess(): void {
           :disabled="!itemName.trim() || (itemModal === 'agent' && !itemProfileId)"
           @click="addWorkspaceItem"
         >
-          Add {{ itemModal }}
+          <AppIcon name="plus" />Add {{ itemModal }}
         </button>
       </footer>
     </section>
@@ -552,7 +572,9 @@ function clearProcess(): void {
       >
       <footer class="modal-actions">
         <button @click="rebindOpen = false">Cancel</button
-        ><button class="primary" :disabled="!rebindCheckoutId" @click="rebind">Rebind</button>
+        ><button class="primary" :disabled="!rebindCheckoutId" @click="rebind">
+          <AppIcon name="git-branch" />Rebind
+        </button>
       </footer>
     </section>
   </div>

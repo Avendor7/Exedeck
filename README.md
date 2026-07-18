@@ -111,7 +111,7 @@ checks in managed environments.
 
 - `Ctrl/Cmd+F` focuses the project/workspace filter.
 - `Ctrl/Cmd+Shift+N` creates a worktree workspace in the selected project.
-- `Ctrl/Cmd+G` toggles the Git inspector.
+- `Ctrl/Cmd+G` opens the selected workspace's Git view in the main window.
 - Control + backtick, or `F6`, focuses the interactive terminal.
 - `F11` toggles full-screen mode.
 - `Escape` closes dismissible dialogs; confirmations keep focus contained.

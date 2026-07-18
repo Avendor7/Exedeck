@@ -10,6 +10,7 @@ import type {
   GitStatus,
   ProjectConfig,
 } from '../../shared/types'
+import AppIcon from './AppIcon.vue'
 
 const props = defineProps<{
   project: ProjectConfig
@@ -236,7 +237,7 @@ onBeforeUnmount(() => {
           >{{ status.branch }}
           <small v-if="status.ahead || status.behind">↑{{ status.ahead }} ↓{{ status.behind }}</small></span
         >
-        <button type="button" class="small" :disabled="busy" @click="refresh">Refresh</button>
+        <button type="button" class="small" :disabled="busy" @click="refresh"><AppIcon name="refresh" />Refresh</button>
       </div>
     </header>
     <p v-if="message" class="operation-message" role="status">{{ message }}</p>
@@ -259,9 +260,11 @@ onBeforeUnmount(() => {
               :disabled="!status?.files.length"
               @click="operate(() => git.stage(checkoutId, paths()))"
             >
-              Stage all</button
-            ><button class="small" @click="operate(() => git.stash(checkoutId))">Stash</button
-            ><button class="small" @click="operate(() => git.stashPop(checkoutId))">Pop</button>
+              <AppIcon name="check" />Stage all</button
+            ><button class="small" @click="operate(() => git.stash(checkoutId))"><AppIcon name="archive" />Stash</button
+            ><button class="small" @click="operate(() => git.stashPop(checkoutId))">
+              <AppIcon name="arrow-up" />Pop
+            </button>
           </div>
         </div>
         <button
@@ -291,9 +294,10 @@ onBeforeUnmount(() => {
           <input v-model="summary" type="text" placeholder="Commit summary" />
           <textarea v-model="description" placeholder="Optional description" />
           <div class="button-row">
-            <button type="button" class="small" :disabled="busy" @click="generateMessage">Generate with AI</button
+            <button type="button" class="small" :disabled="busy" @click="generateMessage">
+              <AppIcon name="sparkles" />Generate with AI</button
             ><button type="button" class="small primary" :disabled="!summary.trim() || busy" @click="commit">
-              Commit staged
+              <AppIcon name="check" />Commit staged
             </button>
           </div>
         </div>
@@ -311,7 +315,7 @@ onBeforeUnmount(() => {
                 class="small"
                 @click="operate(() => git.stage(checkoutId, paths(selectedFile)))"
               >
-                Stage</button
+                <AppIcon name="check" />Stage</button
               ><button
                 v-if="selectedFile.staged"
                 class="small"
@@ -328,7 +332,7 @@ onBeforeUnmount(() => {
                   )
                 "
               >
-                Discard
+                <AppIcon name="trash" />Discard
               </button>
             </div>
           </header>
@@ -358,9 +362,11 @@ onBeforeUnmount(() => {
           ><span>Description</span><textarea v-model="description" rows="6" placeholder="Optional description" />
         </label>
         <div class="button-row">
-          <button type="button" class="small" :disabled="busy" @click="generateMessage">Generate with AI</button>
+          <button type="button" class="small" :disabled="busy" @click="generateMessage">
+            <AppIcon name="sparkles" />Generate with AI
+          </button>
           <button type="button" class="small primary" :disabled="!summary.trim() || busy" @click="commit">
-            Commit staged
+            <AppIcon name="check" />Commit staged
           </button>
         </div>
       </div>
@@ -386,11 +392,13 @@ onBeforeUnmount(() => {
           :disabled="!branchName.trim()"
           @click="createBranch"
         >
-          Create and switch</button
-        ><button @click="operate(() => git.fetch(checkoutId))">Fetch</button
+          <AppIcon name="plus" />Create and switch</button
+        ><button @click="operate(() => git.fetch(checkoutId))"><AppIcon name="refresh" />Fetch</button
         ><button @click="operate(() => git.pull(checkoutId), 'Pull fast-forward changes into this branch?')">
-          Pull</button
-        ><button @click="operate(() => git.push(checkoutId), 'Push this branch?')">Push</button>
+          <AppIcon name="arrow-down" />Pull</button
+        ><button @click="operate(() => git.push(checkoutId), 'Push this branch?')">
+          <AppIcon name="arrow-up" />Push
+        </button>
       </div>
       <div v-if="currentBranch" class="parent-branch-row">
         <span
@@ -437,7 +445,7 @@ onBeforeUnmount(() => {
             class="small danger"
             @click="operate(() => git.deleteBranch(checkoutId, branch.name), `Delete branch ${branch.name}?`)"
           >
-            Delete
+            <AppIcon name="trash" />Delete
           </button>
         </div>
       </article>
@@ -451,7 +459,7 @@ onBeforeUnmount(() => {
           placeholder="Branch name"
         /><label class="inline-checkbox"><input v-model="createWorktreeBranch" type="checkbox" /> Create branch</label
         ><button class="primary" :disabled="!worktreePath || !worktreeBranch" @click="createWorktree">
-          Create worktree
+          <AppIcon name="git-branch" />Create worktree
         </button>
       </div>
       <article v-for="checkout in checkouts" :key="checkout.id" class="branch-card">
@@ -462,16 +470,16 @@ onBeforeUnmount(() => {
         <span v-if="checkout.isMain" class="pill">Project root</span
         ><span v-if="checkout.busy" class="pill warning">In use</span>
         <div class="button-row">
-          <button class="small" @click="openCheckout(checkout, 'files')">Files</button
-          ><button class="small" @click="openCheckout(checkout, 'editor')">Editor</button
-          ><button class="small" @click="openCheckout(checkout, 'terminal')">Terminal</button
+          <button class="small" @click="openCheckout(checkout, 'files')"><AppIcon name="folder" />Files</button
+          ><button class="small" @click="openCheckout(checkout, 'editor')"><AppIcon name="code" />Editor</button
+          ><button class="small" @click="openCheckout(checkout, 'terminal')"><AppIcon name="terminal" />Terminal</button
           ><button
             v-if="!checkout.isMain"
             class="small danger"
             :disabled="checkout.busy"
             @click="operate(() => git.removeWorktree(checkout.id), `Remove worktree ${checkout.path}?`)"
           >
-            Remove
+            <AppIcon name="trash" />Remove
           </button>
         </div>
       </article>

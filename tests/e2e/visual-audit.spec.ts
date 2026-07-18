@@ -12,7 +12,7 @@ async function expectScreenshot(page: Page, name: string): Promise<void> {
 
 async function expectKeySurfacesInsideViewport(page: Page): Promise<void> {
   const violations = await page
-    .locator('.app-shell, .layout, .main-panel, .workbench-row, .git-inspector, .task-panel')
+    .locator('.app-shell, .layout, .main-panel, .workbench-row, .git-workspace, .task-panel')
     .evaluateAll((elements) =>
       elements.flatMap((element) => {
         const rect = element.getBoundingClientRect()
@@ -47,33 +47,24 @@ for (const size of windowSizes) {
     const { page, resize } = await launchApp('populated')
     await resize(size.width, size.height)
 
+    await page.locator('.workspace-item').getByText('Polish the desktop experience', { exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Polish the desktop experience' })).toBeVisible()
-    await expect(page.locator('.branch-pill')).toContainText('main')
     await expectKeySurfacesInsideViewport(page)
     await expectScreenshot(page, `workspace-${size.name}.png`)
 
-    await page.keyboard.press('Control+j')
-    await expect(page.locator('.task-panel')).toHaveCount(0)
-    await page.waitForTimeout(250)
-    const promptTextareaWithTasksClosed = await page.locator('.agent-prompt-bar textarea').boundingBox()
-    await page.keyboard.press('Control+j')
-    await expect(page.locator('.task-panel')).toBeVisible()
-    await page.waitForTimeout(250)
-    const promptTextareaWithTasksOpen = await page.locator('.agent-prompt-bar textarea').boundingBox()
-    expect(promptTextareaWithTasksOpen?.y).toBeCloseTo(promptTextareaWithTasksClosed?.y ?? 0, 0)
+    await page
+      .getByRole('button', { name: /Git changes, commits, and branches/ })
+      .first()
+      .click()
+    await expect(page.locator('.branch-pill')).toContainText('main')
+    await expectKeySurfacesInsideViewport(page)
 
-    await page.locator('.sidebar-header').getByRole('button', { name: 'New agent workspace' }).click()
-    await expect(page.getByRole('heading', { name: 'New agent workspace' })).toBeVisible()
+    await page.locator('.sidebar-header').getByRole('button', { name: 'New worktree workspace' }).click()
+    await expect(page.getByRole('heading', { name: 'New worktree workspace' })).toBeVisible()
     await page.getByRole('button', { name: 'Cancel' }).click()
 
-    await page.getByRole('button', { name: 'Expand task panel' }).click()
-    await expect(page.locator('.task-panel')).toHaveClass(/expanded/)
-    await page.waitForTimeout(250)
-    const [expandedTaskPanel, promptBarAfterExpand] = await Promise.all([
-      page.locator('.task-panel').boundingBox(),
-      page.locator('.agent-prompt-bar').boundingBox(),
-    ])
-    expect((expandedTaskPanel?.y ?? 0) + (expandedTaskPanel?.height ?? 0)).toBeCloseTo(promptBarAfterExpand?.y ?? 0, 0)
+    await page.getByRole('button', { name: /Type checking/ }).click()
+    await expect(page.getByRole('heading', { name: 'Type checking' })).toBeVisible()
     await expectKeySurfacesInsideViewport(page)
     await expectScreenshot(page, `workspace-tasks-${size.name}.png`)
 
@@ -84,8 +75,8 @@ for (const size of windowSizes) {
     await expect(page.getByRole('heading', { name: 'Exedeck Visual Fixture' })).toBeVisible()
     await expectScreenshot(page, `project-landing-${size.name}.png`)
 
-    await page.locator('.landing-primary').getByRole('button', { name: 'New agent workspace' }).click()
-    await expect(page.getByRole('heading', { name: 'New agent workspace' })).toBeVisible()
+    await page.locator('.landing-primary').getByRole('button', { name: 'New worktree workspace' }).click()
+    await expect(page.getByRole('heading', { name: 'New worktree workspace' })).toBeVisible()
     await expectScreenshot(page, `new-workspace-${size.name}.png`)
     await page.getByRole('button', { name: 'Cancel' }).click()
 

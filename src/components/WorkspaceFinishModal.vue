@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import type { WorkspaceConfig, WorkspaceFinishPreview } from '../../shared/types'
 import { useDialogFocus } from '../composables/useDialogFocus'
+import AppIcon from './AppIcon.vue'
 
 const props = defineProps<{ workspace: WorkspaceConfig }>()
 const emit = defineEmits<{ close: []; finished: [] }>()
@@ -57,7 +58,7 @@ onMounted(async () => {
           <span class="modal-eyebrow">Guided finish</span>
           <h2 id="finish-title">Remove {{ workspace.name }}</h2>
         </div>
-        <button type="button" @click="emit('close')">Cancel</button>
+        <button type="button" @click="emit('close')"><AppIcon name="x" />Cancel</button>
       </header>
       <div v-if="preview" class="workspace-finish-body">
         <dl class="finish-preview">
@@ -102,8 +103,8 @@ onMounted(async () => {
         <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
       </div>
       <footer class="modal-actions">
-        <button type="button" class="primary" :disabled="busy || !preview?.canArchive" @click="finish">
-          Remove workspace
+        <button type="button" class="danger prominent-danger" :disabled="busy || !preview?.canArchive" @click="finish">
+          <AppIcon name="trash" />Remove workspace
         </button>
       </footer>
     </section>

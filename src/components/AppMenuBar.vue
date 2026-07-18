@@ -8,7 +8,7 @@ const props = defineProps<{
   hasAgent: boolean
   canFinishWorkspace: boolean
   agentRunning: boolean
-  gitOpen: boolean
+  gitActive: boolean
 }>()
 const emit = defineEmits<{
   newProject: []
@@ -95,8 +95,10 @@ onBeforeUnmount(() => {
         </button>
         <div v-if="openMenu === 'workspace'" class="app-menu-popover">
           <button :disabled="!hasAgent || agentRunning" @click="action(() => emit('startAgent'))">Start Agent</button>
-          <button :disabled="!agentRunning" @click="action(() => emit('stopAgent'))">Stop Agent</button>
-          <button :disabled="!canFinishWorkspace" @click="action(() => emit('finishWorkspace'))">
+          <button class="menu-danger" :disabled="!agentRunning" @click="action(() => emit('stopAgent'))">
+            Stop Agent
+          </button>
+          <button class="menu-danger" :disabled="!canFinishWorkspace" @click="action(() => emit('finishWorkspace'))">
             Remove Workspace…
           </button>
           <div class="app-menu-separator" />
@@ -115,7 +117,8 @@ onBeforeUnmount(() => {
         </button>
         <div v-if="openMenu === 'view'" class="app-menu-popover">
           <button @click="action(() => emit('toggleGit'))">
-            <span>{{ gitOpen ? 'Hide' : 'Show' }} Git Inspector</span><kbd>Ctrl+G</kbd>
+            <span>{{ gitActive ? 'Git Workspace' : 'Open Git Workspace' }}</span
+            ><kbd>Ctrl+G</kbd>
           </button>
           <div class="app-menu-separator" />
           <button @click="command('zoomIn')">Zoom In</button><button @click="command('zoomOut')">Zoom Out</button

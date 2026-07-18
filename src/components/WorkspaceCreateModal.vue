@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Checkout, ProjectConfig } from '../../shared/types'
 import { useDialogFocus } from '../composables/useDialogFocus'
+import AppIcon from './AppIcon.vue'
 
 const props = defineProps<{ project: ProjectConfig }>()
 const emit = defineEmits<{ close: []; created: [workspaceId: string] }>()
@@ -86,7 +87,7 @@ onMounted(async () => {
           <span class="modal-eyebrow">{{ project.name }}</span>
           <h2 id="workspace-create-title">New worktree workspace</h2>
         </div>
-        <button type="button" class="secondary" @click="emit('close')">Cancel</button>
+        <button type="button" class="secondary" @click="emit('close')"><AppIcon name="x" />Cancel</button>
       </header>
       <div class="workspace-create-body">
         <p>
@@ -100,7 +101,9 @@ onMounted(async () => {
         <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
       </div>
       <footer class="modal-actions">
-        <button type="button" class="primary" :disabled="!canCreate || busy" @click="create">Create workspace</button>
+        <button type="button" class="primary" :disabled="!canCreate || busy" @click="create">
+          <AppIcon name="git-branch" />Create workspace
+        </button>
       </footer>
     </section>
   </div>

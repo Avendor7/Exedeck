@@ -40,6 +40,34 @@ function mountSidebar(filterText = '') {
   })
 }
 
+function mountSidebarWithWorkspace() {
+  return mount(Sidebar, {
+    attachTo: document.body,
+    props: {
+      projects: [project],
+      workspaces: [
+        {
+          id: 'workspace-root',
+          projectId: project.id,
+          checkoutId: `${project.id}:root`,
+          kind: 'root' as const,
+          name: 'Root',
+          agents: [],
+          terminals: [],
+          createdAt: 1,
+        },
+      ],
+      selectedProjectId: project.id,
+      selectedWorkspaceId: 'workspace-root',
+      selectedItemKind: 'workspace',
+      selectedItemId: '',
+      filterText: '',
+      getAgentRuntime: vi.fn(() => ({ state: 'stopped' as const, unread: false })),
+      getTaskRuntime: vi.fn(() => ({ running: false })),
+    },
+  })
+}
+
 describe('Sidebar', () => {
   it('emits the project identifier when its landing page is selected', async () => {
     const wrapper = mountSidebar()
@@ -60,5 +88,13 @@ describe('Sidebar', () => {
     wrapper.vm.focusSearch()
 
     expect(document.activeElement).toBe(wrapper.get('input[type="search"]').element)
+  })
+
+  it('offers Git as a workspace item in the main navigation', async () => {
+    const wrapper = mountSidebarWithWorkspace()
+    await wrapper.get('.workspace-item').trigger('click')
+
+    expect(wrapper.emitted('selectWorkspace')).toEqual([['workspace-root']])
+    expect(wrapper.emitted('selectItem')).toEqual([['git', 'workspace-root']])
   })
 })

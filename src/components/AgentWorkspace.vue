@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { AgentProfile, AgentRuntimeSnapshot, Checkout, WorkspaceAgent, WorkspaceConfig } from '../../shared/types'
+import AppIcon from './AppIcon.vue'
 import TerminalView from './TerminalView.vue'
 
 const props = defineProps<{
@@ -50,10 +51,14 @@ defineExpose({ focusTerminal: () => terminalRef.value?.focusTerminal() })
       </div>
       <div class="button-row">
         <span class="running-pill" :class="{ active: running }">{{ runtime.state }}</span>
-        <button type="button" class="small" @click="clear">Clear</button>
-        <button v-if="running" type="button" class="small" @click="emit('restart')">Restart</button>
-        <button v-if="running" type="button" class="small danger" @click="emit('stop')">Stop</button>
-        <button type="button" class="small" @click="emit('finish')">Finish…</button>
+        <button type="button" class="small" @click="clear"><AppIcon name="eraser" />Clear</button>
+        <button v-if="running" type="button" class="small" @click="emit('restart')">
+          <AppIcon name="refresh" />Restart
+        </button>
+        <button v-if="running" type="button" class="small danger" @click="emit('stop')">
+          <AppIcon name="square" />Stop
+        </button>
+        <button type="button" class="small danger" @click="emit('finish')"><AppIcon name="archive" />Finish…</button>
       </div>
     </header>
 
@@ -62,8 +67,10 @@ defineExpose({ focusTerminal: () => terminalRef.value?.focusTerminal() })
         <strong>Checkout unavailable</strong>
         <p>This worktree may have been moved or deleted. Rebind it or archive the workspace.</p>
       </div>
-      <button type="button" class="small primary" @click="emit('rebind')">Rebind checkout</button>
-      <button type="button" class="small" @click="emit('finish')">Archive</button>
+      <button type="button" class="small primary" @click="emit('rebind')">
+        <AppIcon name="git-branch" />Rebind checkout
+      </button>
+      <button type="button" class="small danger" @click="emit('finish')"><AppIcon name="archive" />Archive</button>
     </div>
 
     <div class="agent-terminal" :class="{ disabled: !checkout }">
@@ -88,7 +95,7 @@ defineExpose({ focusTerminal: () => terminalRef.value?.focusTerminal() })
         @keydown.meta.enter.prevent="start"
       />
       <button type="submit" class="primary" :disabled="running || !checkout">
-        {{ running ? 'Agent running' : 'Start agent' }}
+        <AppIcon :name="running ? 'check' : 'play'" />{{ running ? 'Agent running' : 'Start agent' }}
       </button>
     </form>
   </section>

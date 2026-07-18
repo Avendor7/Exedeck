@@ -45,7 +45,7 @@ async function prepareFixtureProject(): Promise<void> {
 
 function populatedConfig() {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     onboardingCompleted: true,
     projects: [
       {
@@ -100,23 +100,23 @@ function populatedConfig() {
         enabled: true,
       },
     ],
-    agentWorkspaces: [
+    workspaces: [
       {
         id: 'visual-workspace',
         projectId: 'visual-project',
         checkoutId: 'visual-project:root',
-        profileId: 'agent-profile-codex',
-        title: 'Polish the desktop experience',
+        name: 'Root',
+        kind: 'root',
         createdAt: 1_700_000_000_000,
-      },
-      {
-        id: 'archived-workspace',
-        projectId: 'visual-project',
-        checkoutId: 'visual-project:root',
-        profileId: 'agent-profile-claude',
-        title: 'Completed visual review',
-        createdAt: 1_699_000_000_000,
-        archivedAt: 1_699_500_000_000,
+        agents: [
+          {
+            id: 'visual-agent',
+            profileId: 'agent-profile-codex',
+            name: 'Polish the desktop experience',
+            createdAt: 1_700_000_000_000,
+          },
+        ],
+        terminals: [],
       },
     ],
   }

@@ -11,7 +11,7 @@ import type {
 } from '../../shared/types'
 import { prepareConfigForIpc } from '../utils/configSerialization'
 
-export type WorkspaceItemKind = 'workspace' | 'agent' | 'terminal' | 'task'
+export type WorkspaceItemKind = 'workspace' | 'git' | 'agent' | 'terminal' | 'task'
 
 const config = ref<AppConfig | null>(null)
 const selectedProjectId = ref('')
@@ -80,6 +80,7 @@ function ensureSelections(next: AppConfig): void {
 
   const itemStillExists =
     selectedItemKind.value === 'workspace' ||
+    (selectedItemKind.value === 'git' && selectedItemId.value === workspace?.id) ||
     (selectedItemKind.value === 'agent' && workspace?.agents.some((item) => item.id === selectedItemId.value)) ||
     (selectedItemKind.value === 'terminal' && workspace?.terminals.some((item) => item.id === selectedItemId.value)) ||
     (selectedItemKind.value === 'task' && project?.tasks.some((item) => item.id === selectedItemId.value))
@@ -198,7 +199,7 @@ export function useStore() {
     selectedItemId.value = id
     if (kind === 'agent') {
       await Promise.all([loadAgentBuffer(id), window.exedeck.agents.markRead(id)])
-    } else {
+    } else if (kind === 'terminal' || kind === 'task') {
       await loadTaskBuffer(id)
     }
   }
